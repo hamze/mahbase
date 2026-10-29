@@ -1,0 +1,43 @@
+Act as a Senior Software Architect and Domain Modeling Expert. We are designing a highly flexible, general-purpose, single-store E-commerce platform (NOT multi-tenant). The goal is to support vastly different product types (e.g., clothing, jewelry/gold, electronics/audio, fresh meat, pet supplies) within ONE unified database and system architecture.
+
+We are currently in the ANALYSIS AND DESIGN PHASE. Technical implementation, specific frameworks, and error-handling code will be handled by a separate engineering team. We are ONLY focusing on:
+1. Domain Modeling & Database Logic.
+2. Entity Relationships & Business Rules.
+3. API Contracts (Endpoints, request/response payloads, and query parameters) from a conceptual standpoint.
+4. RBAC & Permission Matrix.
+5. High-Level Frontend Flows (Data fetching strategies, user journeys, and conditional rendering based on permissions).
+
+CONTEXT & CONSTRAINTS (Based on finalized Catalog & Product Specification):
+1. Single-Store Architecture: All products belong to ONE store.
+2. Attributes vs. Variants: STRICTLY SEPARATED.
+   - Attributes are descriptive (e.g., Material, Country). They have an `is_variant_generator` boolean. If true, they generate Variants.
+   - Variants are purchasable and MUST have their own dedicated SKU, Stock, and Price records.
+3. Pricing Model: Stored per Variant: `base_price` (standard selling price), `wholesale_price` (nullable, overrides base price for wholesale customers), `discount_percentage` (optional), and `is_discount_active` (boolean). The Admin panel dynamically calculates and displays the Final Price next to inputs.
+4. Quantity & Units:
+   - Unit is defined at the Product level via a ForeignKey to a `Unit` table (e.g., Kg, Piece, Package).
+   - Stock is a Decimal at the Variant level (e.g., 15.500).
+   - `pack_size` (nullable Decimal) represents the weight/volume of a fixed package (e.g., 3.5 Kg pack).
+   - `purchase_step` (Decimal) dictates the increment amount (e.g., 0.5 for loose meat, 1 for packaged goods).
+   - `max_purchase` (Decimal, Default: 10) limits the quantity a customer can buy per order.
+5. Roles & Permissions: Granular RBAC. Suppliers see only their own products/orders. Admin Panel UI conditionally renders based on permissions. Hard deletion of products is disabled; soft delete via `is_published=False` is used to preserve order history.
+6. Media Management: Images are NOT JSON fields. They are stored in a separate `MediaAsset` table (`file`, `image_type` [Thumbnail, Main, Gallery, Description], `alt_text`, `sort_order`). Images are compressed and resized to WebP in the backend.
+7. Security: Rich Text Editor input must be sanitized via an allowlist to prevent XSS.
+8. Admin Panel UX: Every section in the Admin Panel (Categories, Tags, Brands, Attributes, Units, Products, Variants, Pricing) must include a "Admin Panel Guide" (help text/examples) at the top to explain the entity and how to use it.
+9. Language & Localization: Fully Persian/RTL platform. NO Persian comments or hardcoded strings in the codebase (use i18n keys).
+10. Tags: Pre-defined by Admin, mapped to specific Categories (M2M). No free-text tags on product creation.
+
+IMPLEMENTATION DELIVERABLES (For the engineering team):
+1. Create the database models and relationships exactly as defined in the specification (including MediaAsset, Unit, and separate VariantAttribute tables).
+2. Implement the necessary API endpoints and RBAC permissions.
+3. Set up and configure the Django Admin for internal database management.
+4. Create a fully custom, Persian (RTL) Admin Panel using Next.js.
+   - The UI must include the "Admin Panel Guide" text blocks at the top of each section (Categories, Tags, Brands, Attributes, Units, Products, Variants) to guide the user.
+   - Dynamic UI (showing/hiding fields based on category).
+   - Conditional rendering based on RBAC permissions.
+   - Rich Text Editor with Image Upload and backend XSS sanitization.
+   - Support for auto-generating variant combinations with the ability to disable specific combos.
+5. Expected Output: Complete backend code (models, APIs, permissions, sanitization) and a working Next.js frontend admin panel with integrated help texts.
+
+I will provide you with the reference document context but we will adapt it into our single-store general model.
+
+In the next message, I will ask you to analyze a specific entity. Please confirm you understand this context and wait for my next instruction.
