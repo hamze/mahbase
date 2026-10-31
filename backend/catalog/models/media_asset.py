@@ -1,0 +1,178 @@
+import io
+import uuid
+from typing import TYPE_CHECKING
+
+from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.core.files.base import ContentFile
+from django.core.files.uploadedfile import UploadedFile
+from django.db import models
+from django.db.models import Q
+from django.utils import timezone
+from PIL import Image, UnidentifiedImageError
+
+if TYPE_CHECKING:
+    from catalog.models import Brand, Category, Product
+
+ALLOWED_IMAGE_FORMATS ={"JPEG", "PNG", "WEBP", "GIF"}
+
+
+def media_upload_to(instance: "MediaAsset", filename: str) -> str:
+    if instance.product_id:
+        folder = f"products/{instance.product_id}"
+    elif instance.brand_id:
+        folder = f"brands/{instance.brand_id}"
+    elif instance.category_id:
+        folder = f"categories/{instance.category_id}"
+    else:
+        folder = "temporary"
+    return f"{folder}/{filename}"
+
+
+class MediaAsset(models.Model):
+    class ImageType(models.TextChoices):
+        THUMBNAIL = "thumbnail", "Thumbnail"
+        MAIN = "main", "Main"
+        GALLERY = "gallery", "Gallery"
+        DESCRIPTION = "description", "Description"
+        BRAND_LOGO = "brand_logo", "Brand logo"
+        CATEGORY_ICON = "category_icon", "Category icon"
+        TEMPORARY = "temporary", "Temporary"
+
+    PRODUCT_TYPES = (ImageType.THUMBNAIL, ImageType.MAIN, ImageType.GALLERY, ImageType.DESCRIPTION)
+
+    file = models.ImageField(upload_to=media_upload_to, width_field="width", height_field="height")
+    width = models.PositiveIntegerField(default=0)
+    height = models.PositiveIntegerField(default=0)
+    alt_text = models.CharField(max_length=255, blank=True)
+    image_type = models.CharField(max_length=20, choices=ImageType.choices, default=ImageType.TEMPORARY)
+    sort_order = models.IntegerField(default=0)
+    product = models.ForeignKey(
+        "catalog.Product", null=True, blank=True, on_delete=models.PROTECT, related_name="media"
+    )
+    brand = models.ForeignKey(
+        "catalog.Brand", null=True, blank=True, on_delete=models.PROTECT, related_name="media"
+    )
+    category = models.ForeignKey(
+        "catalog.Category", null=True, blank=True, on_delete=models.PROTECT, related_name="media"
+    )
+    temporary_since = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["sort_order", "id"]
+        permissions = [("media_manage", "Can manage media")]
+        constraints = [
+            # Temporary media has no owner; every other type has exactly its one compatible owner.
+            models.CheckConstraint(
+                name="media_asset_type_matches_owner",
+                condition=(
+                    Q(image_type="temporary", product__isnull=True, brand__isnull=True, category__isnull=True)
+                    | Q(
+                        image_type__in=["thumbnail", "main", "gallery", "description"],
+                        product__isnull=False,
+                        brand__isnull=True,
+                        category__isnull=True,
+                    )
+                    | Q(image_type="brand_logo", product__isnull=True, brand__isnull=False, category__isnull=True)
+                    | Q(image_type="category_icon", product__isnull=True, brand__isnull=True, category__isnull=False)
+                ),
+            ),
+        ]
+        indexes = [models.Index(fields=["image_type", "temporary_since"])]
+
+    def __str__(self) -> str:
+        return self.file.name
+
+    @classmethod
+    def owner_type_error(cls, image_type: str, product_id: int | None, brand_id: int | None,
+                         category_id: int | None) -> str | None:
+        owners = [o for o in (product_id, brand_id, category_id) if o is not None]
+        if image_type == cls.ImageType.TEMPORARY:
+            return "Temporary media cannot have an owner." if owners else None
+        if len(owners) != 1:
+            return "Active media must have exactly one owner."
+        if image_type in cls.PRODUCT_TYPES and product_id is None:
+            return f"Image type '{image_type}' can only belong to a product."
+        if image_type == cls.ImageType.BRAND_LOGO and brand_id is None:
+            return "Brand logos can only belong to a brand."
+        if image_type == cls.ImageType.CATEGORY_ICON and category_id is None:
+            return "Category icons can only belong to a category."
+        return None
+
+    def clean(self) -> None:
+        error = self.owner_type_error(self.image_type, self.product_id, self.brand_id, self.category_id)
+        if error:
+            raise ValidationError({"image_type": error})
+
+    @staticmethod
+    def convert_upload(upload: UploadedFile) -> ContentFile:
+        """Verify the real image format and dimensions and re-encode the upload as WebP."""
+        if upload.size > settings.MEDIA_MAX_UPLOAD_BYTES:
+            raise ValidationError({"file": f"File exceeds {settings.MEDIA_MAX_UPLOAD_BYTES} bytes."})
+        try:
+            image = Image.open(upload)
+            image.verify()
+            upload.seek(0)
+            image = Image.open(upload)
+            image.load()
+        except (UnidentifiedImageError, OSError, SyntaxError):
+            raise ValidationError({"file": "The file is not a valid image."})
+        if image.format not in ALLOWED_IMAGE_FORMATS:
+            raise ValidationError({"file": f"Image format '{image.format}' is not allowed."})
+        width, height = image.size
+        if min(width, height) < settings.MEDIA_MIN_DIMENSION or max(width, height) > settings.MEDIA_MAX_DIMENSION:
+            raise ValidationError({
+                "file": f"Image dimensions must be between {settings.MEDIA_MIN_DIMENSION} "
+                        f"and {settings.MEDIA_MAX_DIMENSION} pixels."
+            })
+        if image.mode not in ("RGB", "RGBA"):
+            image = image.convert("RGBA" if "A" in image.getbands() or "transparency" in image.info else "RGB")
+        buffer = io.BytesIO()
+        image.save(buffer, format="WEBP", quality=settings.MEDIA_WEBP_QUALITY, method=6)
+        return ContentFile(buffer.getvalue(), name=f"{uuid.uuid4().hex}.webp")
+
+    @classmethod
+    def claim(
+        cls,
+        items: list[tuple[int, str]],
+        *,
+        product: "Product | None" = None,
+        brand: "Brand | None" = None,
+        category: "Category | None" = None,
+    ) -> None:
+        """Attach temporary assets to one owner; must run inside the caller's transaction.
+
+        Rows are locked so a concurrent cleanup or claim cannot take the same asset.
+        """
+        if not items:
+            return
+        ids = [asset_id for asset_id, _ in items]
+        assets = {
+            asset.pk: asset
+            for asset in cls.objects.select_for_update().filter(pk__in=ids, image_type=cls.ImageType.TEMPORARY)
+        }
+        missing = sorted(set(ids) - set(assets))
+        if missing:
+            raise ValidationError({"media": f"Media assets {missing} are not available temporary uploads."})
+        for position, (asset_id, image_type) in enumerate(items):
+            asset = assets[asset_id]
+            asset.image_type = image_type
+            asset.sort_order = position
+            asset.product = product
+            asset.brand = brand
+            asset.category = category
+            asset.temporary_since = None
+            asset.full_clean(exclude=["file"])
+            asset.save(update_fields=["image_type", "sort_order", "product", "brand", "category", "temporary_since"])
+
+    @classmethod
+    def release(cls, **filters: object) -> None:
+        """Turn owned media back into temporary uploads so retention cleanup removes the files."""
+        cls.objects.filter(**filters).update(
+            image_type=cls.ImageType.TEMPORARY,
+            product=None,
+            brand=None,
+            category=None,
+            temporary_since=timezone.now(),
+        )

@@ -1,1 +1,10 @@
 .idea/
+__pycache__/
+*.pyc
+.venv/
+.env
+backend/media/
+backend/staticfiles/
+frontend/node_modules/
+frontend/.next/
+frontend/next-env.d.ts
