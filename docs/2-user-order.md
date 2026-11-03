@@ -96,6 +96,32 @@ Rules:
 
 No partial state on failure — rollback guarantees `reserved_quantity`, `used_count`, and cart are untouched.
 
+### 4.1. Admin order on behalf of a customer
+
+`POST /api/admin/orders` with `Idempotency-Key` (permission `admin.orders.create`) — same single transaction as above,
+with these differences:
+
+- **Customer:** `customer` (existing, active customer) **or** `new_customer {mobile, first_name, last_name,
+  customer_tier}` → created with `created_source=ADMIN_CREATED` inside the same transaction.
+- **Address:** `address` (must belong to the customer) **or** `new_address` (required for a new customer); the first
+  address becomes the default.
+- **Lines:** explicit `items [{variant, quantity}]` instead of the cart (each variant at most once); the customer's
+  cart is never read or cleared. Same per-line rules, tier pricing (client prices ignored) and `422` per-line errors.
+- **Rollback:** any failure removes the new customer and address too.
+- **Idempotency:** key stored as `admin-<key>`, looked up across customers → a retry returns the existing order
+  (`200`) even when the first attempt created the customer.
+- **After creation:** order is `PENDING_PAYMENT` / `UNPAID` / `RESERVED` with the normal TTL; the response carries
+  `payment_redirect_url` for the admin to send to the customer; expiry and payment work as in §5. Audit log entry
+  `order.created_by_admin`.
+- **Form lookups:** `GET /api/admin/orders/customers?search=`, `GET /api/admin/orders/customers/{id}/addresses`,
+  `GET /api/admin/orders/variants?search=&customer_tier=` (sellable variants with tier price, availability and
+  purchase limits).
+
+**Admin UI (`/manage/orders/new`):** searchable customer picker (mobile/name) or new-customer form → address cards or
+new-address form (province → city) → searchable variant picker (name/SKU, tier price, availability) with an editable
+line table (step/min/max hints, live line totals) → shipping method filtered by the address city + optional code →
+sticky summary and submit. Rejected lines are highlighted in place; success shows the payment link with a copy button.
+
 ---
 
 ## 5. Payment, expiry, late payments
@@ -184,7 +210,7 @@ Payment (§5.1) and expiry (§5.4) both lock the `Order` row first, then check `
 
 **Rule:** `order_status=CANCELLED` with `payment_status=PAID` is invalid.
 
-**Endpoints:** `POST /api/orders`, `GET /api/me/orders`, `GET /api/me/orders/{n}`, `POST /api/me/orders/{n}/refund-request`, `POST /api/me/orders/{n}/return-request`; admin CRUD at `/api/admin/orders/*` (including `items/{id}/preparation-status`, `cancel`), `/api/admin/refunds/*`, `/api/admin/returns/*`.
+**Endpoints:** `POST /api/orders`, `GET /api/me/orders`, `GET /api/me/orders/{n}`, `POST /api/me/orders/{n}/refund-request`, `POST /api/me/orders/{n}/return-request`; admin CRUD at `/api/admin/orders/*` (including `POST` create on behalf of a customer (§4.1), `items/{id}/preparation-status`, `cancel`), `/api/admin/refunds/*`, `/api/admin/returns/*`.
 
 ---
 
@@ -312,6 +338,7 @@ Two roles: **Customer**, **Admin**. No Supplier.
 - **آدرس‌ها:** آدرس‌ها با موقعیت نقشه ذخیره می‌شوند؛ ویرایش/حذف آن‌ها روی سفارش‌های قبلی اثری ندارد.
 - **سبد خرید:** سبد مهمان فقط در session؛ بعد از ورود به سبد دیتابیس منتقل/ادغام می‌شود.
 - **سفارش‌ها:** وضعیت سفارش و پرداخت مستقل‌اند؛ رزرو موجودی از روی اقلام سفارش‌های در انتظار پرداخت قابل ردیابی است.
+- **ثبت سفارش برای مشتری:** مشتری موجود را جستجو کنید یا مشتری جدید با موبایل بسازید، آدرس و کالاها را انتخاب کنید. قیمت‌ها بر اساس نوع مشتری از کاتالوگ محاسبه می‌شود و همان قواعد سبد خرید اعمال می‌شود. با ثبت، موجودی تا پایان مهلت پرداخت رزرو می‌شود و لینک پرداخت برای ارسال به مشتری نمایش داده می‌شود؛ اگر هر قلمی رد شود هیچ چیز (حتی مشتری جدید) ثبت نمی‌شود.
 - **مرجوعی و لغو پرداخت‌شده:** گردش‌کار مستقل با تأیید ادمین؛ تغییر وضعیت صرف مجاز نیست.
 - **پرسش و پاسخ:** ثبت و پاسخ پرسش‌های متداول و پرسش محصولات؛ پاسخ‌ها قبل از انتشار پاک‌سازی می‌شوند.
 - **کد تخفیف:** نوع تخفیف، دسته (دسته اصلی شامل زیردسته‌ها)، کف مبلغ، سقف، بازه اعتبار، محدودیت‌ها و سیاست بازگشت پس از استرداد.

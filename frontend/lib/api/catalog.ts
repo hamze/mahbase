@@ -1,7 +1,16 @@
 import { apiRequest, Page } from "@/lib/api/client";
 import type { AttributeOption, DeleteResult } from "@/lib/api/types";
 
-export type CatalogResource = "categories" | "tags" | "brands" | "units" | "attributes";
+export type CatalogResource =
+  | "categories"
+  | "tags"
+  | "brands"
+  | "units"
+  | "attributes"
+  | "admin/discount-codes"
+  | "admin/shipping-methods"
+  | "admin/faq-categories"
+  | "admin/faqs";
 
 /** Fetch every row of a metadata list (admin catalogs are small); optionally scoped to a category. */
 export async function listAll<T>(resource: CatalogResource, category?: number): Promise<T[]> {

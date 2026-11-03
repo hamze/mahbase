@@ -26,10 +26,10 @@ class ProductVariantSerializer(ModelCleanSerializer):
     class Meta:
         model = ProductVariant
         fields = [
-            "id", "sku", "combination_hash", "attributes", "stock_quantity", "pack_size", "purchase_step",
-            "min_purchase", "max_purchase", *PRICE_FIELDS,
+            "id", "sku", "combination_hash", "attributes", "stock_quantity", "reserved_quantity", "pack_size",
+            "purchase_step", "min_purchase", "max_purchase", *PRICE_FIELDS,
         ]
-        read_only_fields = ["combination_hash"]
+        read_only_fields = ["combination_hash", "reserved_quantity"]
 
     def validate(self, attrs: dict) -> dict:
         attrs = super().validate(attrs)
@@ -105,12 +105,16 @@ class PriceAdjustmentSerializer(serializers.Serializer):
 
 
 class StockUpdateSerializer(serializers.Serializer):
-    """Exactly one of ``stock_quantity`` (absolute) or ``delta`` (relative change)."""
+    """Exactly one of ``stock_quantity`` (absolute) or ``delta`` (relative change).
+
+    ``confirm`` accepts stock below the reserved quantity (affected reserved orders are invalidated).
+    """
 
     stock_quantity = serializers.DecimalField(max_digits=12, decimal_places=3, required=False)
     delta = serializers.DecimalField(max_digits=12, decimal_places=3, required=False)
+    confirm = serializers.BooleanField(default=False)
 
     def validate(self, attrs: dict) -> dict:
-        if len(attrs) != 1:
+        if len(set(attrs) - {"confirm"}) != 1:
             raise serializers.ValidationError("Provide exactly one of 'stock_quantity' or 'delta'.")
         return attrs

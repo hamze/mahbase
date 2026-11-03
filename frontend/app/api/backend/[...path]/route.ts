@@ -15,6 +15,8 @@ async function proxy(request: NextRequest, { params }: Context) {
   const headers = new Headers();
   const contentType = request.headers.get("content-type");
   if (contentType) headers.set("Content-Type", contentType);
+  const idempotencyKey = request.headers.get("idempotency-key");
+  if (idempotencyKey) headers.set("Idempotency-Key", idempotencyKey);
   const body = request.method === "GET" ? undefined : await request.arrayBuffer();
   const response = await backendFetch(
     `${path.join("/")}/${request.nextUrl.search}`,

@@ -11,18 +11,25 @@ export class ApiError extends Error {
   }
 }
 
-type RequestOptions = { method?: string; json?: unknown; formData?: FormData; query?: Record<string, string | undefined> };
+type RequestOptions = {
+  method?: string;
+  json?: unknown;
+  formData?: FormData;
+  query?: Record<string, string | undefined>;
+  headers?: Record<string, string>;
+};
 
 async function send(path: string, options: RequestOptions): Promise<Response> {
   const query = new URLSearchParams(
     Object.entries(options.query ?? {}).filter((entry): entry is [string, string] => Boolean(entry[1])),
   ).toString();
-  const init: RequestInit = { method: options.method ?? "GET", credentials: "same-origin" };
+  const headers: Record<string, string> = { ...options.headers };
+  const init: RequestInit = { method: options.method ?? "GET", credentials: "same-origin", headers };
   if (options.formData) {
     init.body = options.formData;
   } else if (options.json !== undefined) {
     init.body = JSON.stringify(options.json);
-    init.headers = { "Content-Type": "application/json" };
+    headers["Content-Type"] = "application/json";
   }
   return fetch(`/api/backend/${path.replace(/^\/|\/$/g, "")}${query ? `?${query}` : ""}`, init);
 }

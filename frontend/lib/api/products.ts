@@ -46,7 +46,14 @@ export function updateVariant(productId: number, variantId: number, variant: Var
   return apiRequest<Variant>(`products/${productId}/variants/${variantId}`, { method: "PUT", json: variant });
 }
 
-export function updateStock(variantId: number, change: { stock_quantity: string } | { delta: string }): Promise<Variant> {
+/**
+ * Stock below the reserved quantity fails with 409 ``StockBelowReserved`` (affected orders listed) unless
+ * ``confirm`` is true, which invalidates those reserved orders.
+ */
+export function updateStock(
+  variantId: number,
+  change: ({ stock_quantity: string } | { delta: string }) & { confirm?: boolean },
+): Promise<Variant> {
   return apiRequest<Variant>(`variants/${variantId}/stock`, { method: "PATCH", json: change });
 }
 

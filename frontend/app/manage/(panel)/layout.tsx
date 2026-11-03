@@ -9,7 +9,8 @@ import { getCurrentUser } from "@/lib/server/session";
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   const user = await getCurrentUser();
-  if (!user) redirect("/manage/login");
+  // The panel is for staff only; customers authenticate with OTP in the storefront.
+  if (!user?.is_staff) redirect("/manage/login");
   return (
     <PermissionsProvider permissions={user.permissions}>
       <div className="shell">

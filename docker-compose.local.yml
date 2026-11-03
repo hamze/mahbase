@@ -16,5 +16,11 @@ services:
       interval: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    container_name: mahbase-redis
+    ports:
+      - "${REDIS_HOST_PORT:-6380}:6379"
+
 volumes:
   postgres-data:

@@ -3,6 +3,8 @@ import Link from "next/link";
 import { MessageKey, t } from "@/lib/i18n/fa";
 
 const SECTIONS: [string, MessageKey, MessageKey][] = [
+  ["/manage/orders", "nav.orders", "guide.orders.description"],
+  ["/manage/users", "nav.users", "guide.users.description"],
   ["/manage/products", "nav.products", "guide.products.description"],
   ["/manage/stock", "nav.stock", "guide.stock.description"],
   ["/manage/pricing", "nav.pricing", "guide.pricing.bulk.description"],

@@ -5,7 +5,7 @@ from catalog.models.category import Category
 from catalog.models.media_asset import MediaAsset
 from catalog.models.product import Product
 from catalog.models.product_attribute_value import ProductAttributeValue
-from catalog.models.product_variant import ProductVariant
+from catalog.models.product_variant import ProductVariant, StockBelowReserved
 from catalog.models.tag import Tag
 from catalog.models.unit import Unit
 from catalog.models.variant_attribute import VariantAttribute
@@ -19,6 +19,7 @@ __all__ = [
     "Product",
     "ProductAttributeValue",
     "ProductVariant",
+    "StockBelowReserved",
     "Tag",
     "Unit",
     "VariantAttribute",

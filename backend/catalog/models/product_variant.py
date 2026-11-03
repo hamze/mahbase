@@ -1,5 +1,5 @@
 import hashlib
-from decimal import Decimal
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 from typing import TYPE_CHECKING
 
 from django.core.exceptions import ValidationError
@@ -11,18 +11,35 @@ if TYPE_CHECKING:
     from catalog.models import Attribute
 
 QUANTITY = {"max_digits": 12, "decimal_places": 3}
-PRICE = {"max_digits": 14, "decimal_places": 2}
+# Catalog and order money share this type (Toman); order snapshots copy the decimal value as is.
+PRICE = {"max_digits": 18, "decimal_places": 2}
+CENT = Decimal("0.01")
 # Prices are in Toman; bulk adjustments round to whole thousands.
 PRICE_ROUNDING = Decimal("1000")
 
 
+class StockBelowReserved(Exception):
+    """A stock change would leave less stock than is reserved by unpaid orders and was not confirmed."""
+
+    def __init__(self, variant: "ProductVariant", requested: Decimal) -> None:
+        super().__init__(f"Stock {requested} is below the reserved quantity of variant {variant.pk}.")
+        self.variant = variant
+        self.requested = requested
+        self.shortfall = variant.reserved_quantity - requested
+
+
 class ProductVariant(models.Model):
-    """Purchasable item. All quantities are in the product's purchasable unit."""
+    """Purchasable item. All quantities are in the product's purchasable unit.
+
+    ``reserved_quantity`` is held by orders whose ``stock_reservation_status`` is RESERVED;
+    ``available_quantity = stock_quantity - reserved_quantity``.
+    """
 
     product = models.ForeignKey("catalog.Product", on_delete=models.PROTECT, related_name="variants")
     sku = models.CharField(max_length=100, unique=True)
     combination_hash = models.CharField(max_length=32)
     stock_quantity = models.DecimalField(**QUANTITY, default=Decimal("0"))
+    reserved_quantity = models.DecimalField(**QUANTITY, default=Decimal("0"))
     pack_size = models.DecimalField(**QUANTITY, null=True, blank=True)
     purchase_step = models.DecimalField(**QUANTITY, default=Decimal("1"))
     min_purchase = models.DecimalField(**QUANTITY, default=Decimal("1"))
@@ -37,6 +54,7 @@ class ProductVariant(models.Model):
         constraints = [
             models.UniqueConstraint(fields=["product", "combination_hash"], name="uniq_variant_combination"),
             models.CheckConstraint(name="variant_stock_non_negative", condition=Q(stock_quantity__gte=0)),
+            models.CheckConstraint(name="variant_reserved_non_negative", condition=Q(reserved_quantity__gte=0)),
             models.CheckConstraint(name="variant_purchase_step_positive", condition=Q(purchase_step__gt=0)),
             models.CheckConstraint(name="variant_min_purchase_positive", condition=Q(min_purchase__gt=0)),
             models.CheckConstraint(
@@ -75,6 +93,51 @@ class ProductVariant(models.Model):
         if errors:
             raise ValidationError(errors)
 
+    @property
+    def available_quantity(self) -> Decimal:
+        return self.stock_quantity - self.reserved_quantity
+
+    def is_sellable(self) -> bool:
+        return self.product.is_published and self.product.deleted_at is None
+
+    def purchase_errors(self, quantity: Decimal) -> list[str]:
+        """Purchase rules for one cart/order line (step, min/max, availability); empty when the line is valid."""
+        errors = []
+        if not self.is_sellable():
+            errors.append("This product is not available for sale.")
+        if quantity <= 0:
+            errors.append("Quantity must be greater than zero.")
+        elif quantity % self.purchase_step != 0:
+            errors.append(f"Quantity must be a multiple of {self.purchase_step.normalize()}.")
+        if quantity < self.min_purchase or quantity > self.max_purchase:
+            errors.append(
+                f"Quantity must be between {self.min_purchase.normalize()} and {self.max_purchase.normalize()}."
+            )
+        if quantity > self.available_quantity:
+            errors.append("Insufficient stock.")
+        return errors
+
+    def clamp_quantity(self, quantity: Decimal) -> Decimal | None:
+        """Largest valid quantity not above ``quantity``, ``max_purchase`` or availability; None when below minimum."""
+        limit = min(quantity, self.max_purchase, self.available_quantity)
+        steps = (limit / self.purchase_step).to_integral_value(rounding=ROUND_DOWN)
+        clamped = steps * self.purchase_step
+        return clamped if clamped >= self.min_purchase and clamped > 0 else None
+
+    def price_for(self, customer_tier: str) -> tuple[Decimal, Decimal]:
+        """(original unit price, product discount per unit) for a tier.
+
+        Wholesale customers get ``wholesale_price`` when set, otherwise ``base_price``; the discount applies only
+        while ``is_discount_active``.
+        """
+        original = self.base_price
+        if customer_tier == "WHOLESALE" and self.wholesale_price is not None:
+            original = self.wholesale_price
+        discount = Decimal("0")
+        if self.is_discount_active and self.discount_percentage:
+            discount = (original * self.discount_percentage / 100).quantize(CENT, rounding=ROUND_HALF_UP)
+        return original, discount
+
     @staticmethod
     def compute_combination_hash(pairs: list[tuple["Attribute", str]]) -> str:
         normalized = "|".join(f"{attribute.pk}:{value}" for attribute, value in sorted(pairs, key=lambda p: p[0].pk))
@@ -103,14 +166,25 @@ class ProductVariant(models.Model):
 
     @classmethod
     def update_stock(
-        cls, variant_id: int, *, quantity: Decimal | None = None, delta: Decimal | None = None
+        cls,
+        variant_id: int,
+        *,
+        quantity: Decimal | None = None,
+        delta: Decimal | None = None,
+        allow_below_reserved: bool = False,
     ) -> "ProductVariant":
-        """Set or adjust stock while holding a row lock (SELECT ... FOR UPDATE)."""
+        """Set or adjust stock while holding a row lock (SELECT ... FOR UPDATE).
+
+        Stock below ``reserved_quantity`` raises ``StockBelowReserved`` unless ``allow_below_reserved``
+        (the caller then invalidates the affected reserved orders in the same transaction).
+        """
         with transaction.atomic():
             variant = cls.objects.select_for_update().get(pk=variant_id)
             new_quantity = quantity if quantity is not None else variant.stock_quantity + delta
             if new_quantity < 0:
                 raise ValidationError({"stock_quantity": "Stock cannot be negative."})
+            if new_quantity < variant.reserved_quantity and not allow_below_reserved:
+                raise StockBelowReserved(variant, new_quantity)
             variant.stock_quantity = new_quantity
             variant.save(update_fields=["stock_quantity"])
         return variant

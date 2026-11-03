@@ -3,7 +3,15 @@ import { cookies } from "next/headers";
 import { backendFetch } from "@/lib/server/backend";
 import { ACCESS_COOKIE } from "@/lib/server/config";
 
-export type CurrentUser = { id: number; username: string; is_staff: boolean; permissions: string[] };
+export type CurrentUser = {
+  id: number;
+  username: string;
+  first_name: string;
+  last_name: string;
+  is_staff: boolean;
+  customer_tier: "RETAIL" | "WHOLESALE" | null;
+  permissions: string[];
+};
 
 /** Fetch JSON from Django in a server component using the access cookie the middleware keeps fresh. */
 export async function serverGet<T>(path: string): Promise<T | null> {

@@ -15,11 +15,26 @@ import { MessageKey, t } from "@/lib/i18n/fa";
 type Row = { id: number } & Record<string, unknown>;
 type Form = Record<string, unknown>;
 
+type Option = { value: number; label: string };
+
 export type FieldDef = {
   name: string;
   label: MessageKey;
-  kind: "text" | "textarea" | "number" | "checkbox" | "parentCategory" | "categories" | "choice" | "image";
+  kind:
+    | "text"
+    | "textarea"
+    | "number"
+    | "checkbox"
+    | "parentCategory"
+    | "categories"
+    | "choice"
+    | "image"
+    | "datetime"
+    | "select"
+    | "multi";
   choices?: { value: string; label: MessageKey }[];
+  /** "select" (single, nullable) and "multi" fields: loads the options once. */
+  loadOptions?: () => Promise<Option[]>;
   /** Tooltip key suffix (``help.<help>``) when it differs from the field name. */
   help?: string;
   /** "categories" fields: text shown while nothing is selected. */
@@ -32,7 +47,8 @@ type CategoryLookup = (id: number | null) => string;
 
 type Props = {
   resource: CatalogResource;
-  section: string;
+  /** Guide section shown above the list; omitted for a second manager on the same page. */
+  section?: string;
   permission: string;
   fields: FieldDef[];
   columns: ColumnDef[];
@@ -45,7 +61,8 @@ type Props = {
   rowExtra?: (row: Row, reload: () => void) => ReactNode;
 };
 
-/** Generic list + form for catalog metadata with the section guide, RBAC-aware controls and deactivation feedback. */
+/** Generic list + form for catalog metadata and simple admin resources (discount codes, shipping, FAQ) with the
+ * section guide, RBAC-aware controls and deactivation feedback. */
 export function ResourceManager(props: Props) {
   const { resource, section, permission, fields, columns, emptyForm } = props;
   const can = useCan();
@@ -53,6 +70,7 @@ export function ResourceManager(props: Props) {
   const needsCategories = fields.some((field) => field.kind === "parentCategory" || field.kind === "categories");
 
   const [rows, setRows] = useState<Row[]>([]);
+  const [options, setOptions] = useState<Record<string, Option[]>>({});
   const [categories, setCategories] = useState<Category[]>([]);
   const [form, setForm] = useState<Form | null>(null);
   const [files, setFiles] = useState<Record<string, File>>({});
@@ -67,6 +85,18 @@ export function ResourceManager(props: Props) {
   useEffect(() => {
     reload().catch((error) => setErrors(errorMessages(error)));
   }, [reload]);
+
+  useEffect(() => {
+    fields
+      .filter((field) => field.loadOptions)
+      .forEach((field) =>
+        field.loadOptions!()
+          .then((loaded) => setOptions((current) => ({ ...current, [field.name]: loaded })))
+          .catch((error) => setErrors(errorMessages(error))),
+      );
+    // Options are loaded once per page; field definitions are static.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const lookup: CategoryLookup = (id) => categories.find((category) => category.id === id)?.name ?? t("common.none");
 
@@ -169,6 +199,47 @@ export function ResourceManager(props: Props) {
             </select>
           </label>
         );
+      case "select":
+        return (
+          <label key={field.name}>
+            <FieldLabel field={field.name}>{t(field.label)}</FieldLabel>
+            <select
+              value={value == null ? "" : String(value)}
+              onChange={(e) => set(field.name, e.target.value ? Number(e.target.value) : null)}
+            >
+              <option value="">{t("common.none")}</option>
+              {(options[field.name] ?? []).map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        );
+      case "multi":
+        return (
+          <div key={field.name} className="field">
+            <FieldLabel field={field.help ?? field.name}>{t(field.label)}</FieldLabel>
+            <MultiSelect
+              placeholder={field.placeholder && t(field.placeholder)}
+              options={options[field.name] ?? []}
+              value={(value as number[]) ?? []}
+              onChange={(ids) => set(field.name, ids)}
+            />
+          </div>
+        );
+      case "datetime":
+        return (
+          <label key={field.name}>
+            <FieldLabel field={field.name}>{t(field.label)}</FieldLabel>
+            <input
+              type="datetime-local"
+              dir="ltr"
+              value={toLocalInput(value)}
+              onChange={(e) => set(field.name, e.target.value ? new Date(e.target.value).toISOString() : null)}
+            />
+          </label>
+        );
       case "image":
         return (
           <label key={field.name}>
@@ -191,7 +262,12 @@ export function ResourceManager(props: Props) {
               type={field.kind === "number" ? "number" : "text"}
               dir={field.name === "slug" ? "ltr" : undefined}
               value={String(value ?? "")}
-              onChange={(e) => set(field.name, field.kind === "number" ? Number(e.target.value) : e.target.value)}
+              onChange={(e) =>
+                set(
+                  field.name,
+                  field.kind !== "number" ? e.target.value : e.target.value === "" ? null : Number(e.target.value),
+                )
+              }
             />
           </label>
         );
@@ -200,7 +276,7 @@ export function ResourceManager(props: Props) {
 
   return (
     <>
-      <Guide section={section} example={props.showExample} />
+      {section && <Guide section={section} example={props.showExample} />}
       <Messages errors={errors} notice={notice} />
       {canManage && !form && (
         <button className="primary" onClick={() => setForm({ ...emptyForm })}>
@@ -259,6 +335,13 @@ export function ResourceManager(props: Props) {
       </div>
     </>
   );
+}
+
+/** ISO timestamp → value of a ``datetime-local`` input in the browser's time zone. */
+function toLocalInput(value: unknown): string {
+  if (!value) return "";
+  const date = new Date(String(value));
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
 
 /** Brands and tags without categories apply to all categories. */

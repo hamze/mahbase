@@ -19,6 +19,17 @@ ALLOWED_DESCRIPTION_ATTRIBUTES = {
 ALLOWED_DESCRIPTION_PROTOCOLS = ["http", "https", "mailto"]
 
 
+def sanitize_html(value: str) -> str:
+    """Allowlist rich-text sanitization (product descriptions, FAQ answers, product question answers)."""
+    return bleach.clean(
+        value,
+        tags=ALLOWED_DESCRIPTION_TAGS,
+        attributes=ALLOWED_DESCRIPTION_ATTRIBUTES,
+        protocols=ALLOWED_DESCRIPTION_PROTOCOLS,
+        strip=True,
+    )
+
+
 class Product(models.Model):
     name = models.CharField(max_length=255)
     slug = models.SlugField(max_length=255, unique=True)
@@ -50,13 +61,7 @@ class Product(models.Model):
         return self.name
 
     def save(self, *args, **kwargs) -> None:
-        self.description_long = bleach.clean(
-            self.description_long,
-            tags=ALLOWED_DESCRIPTION_TAGS,
-            attributes=ALLOWED_DESCRIPTION_ATTRIBUTES,
-            protocols=ALLOWED_DESCRIPTION_PROTOCOLS,
-            strip=True,
-        )
+        self.description_long = sanitize_html(self.description_long)
         super().save(*args, **kwargs)
 
     @staticmethod

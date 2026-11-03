@@ -6,9 +6,10 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { Guide } from "@/components/Guide";
 import { FieldLabel } from "@/components/InfoTip";
 import { Messages } from "@/components/Messages";
+import { ApiError } from "@/lib/api/client";
 import { errorMessages } from "@/lib/api/errors";
 import { getProduct, listProducts, PriceChange, updateStock, updateVariantPrice } from "@/lib/api/products";
-import type { Product, Variant } from "@/lib/api/types";
+import type { Product, StockBelowReserved, Variant } from "@/lib/api/types";
 import { useCan } from "@/lib/auth/permissions";
 import { MessageKey, t } from "@/lib/i18n/fa";
 import { finalPrice, formatNumber, plainNumber } from "@/lib/pricing";
@@ -76,6 +77,23 @@ export function StockManager({ initialSlug }: { initialSlug?: string }) {
     return stockChanged(draft, variant) || priceChanged(draft, variant);
   };
 
+  const saveStock = async (variantId: number, stock_quantity: string) => {
+    try {
+      await updateStock(variantId, { stock_quantity });
+    } catch (error) {
+      const data = error instanceof ApiError ? (error.data as StockBelowReserved | null) : null;
+      if (data?.warning !== "stock_below_reserved") throw error;
+      const message = t("stock.belowReservedConfirm", {
+        requested: formatNumber(plainNumber(data.requested)),
+        reserved: formatNumber(plainNumber(data.reserved_quantity)),
+        shortfall: formatNumber(plainNumber(data.shortfall)),
+        orders: data.affected_orders.map((order) => order.order_number).join("، "),
+      });
+      // Declining leaves the stock unchanged; the row stays dirty.
+      if (window.confirm(message)) await updateStock(variantId, { stock_quantity, confirm: true });
+    }
+  };
+
   const save = async (variants: Variant[]) => {
     if (!product) return;
     setSaving(true);
@@ -86,7 +104,7 @@ export function StockManager({ initialSlug }: { initialSlug?: string }) {
       const draft = drafts[variant.id!];
       try {
         if (canStock && stockChanged(draft, variant)) {
-          await updateStock(variant.id!, { stock_quantity: draft.stock_quantity });
+          await saveStock(variant.id!, draft.stock_quantity);
         }
         if (canPrice && priceChanged(draft, variant)) {
           const { stock_quantity: _stock, ...prices } = draft;
@@ -213,6 +231,11 @@ export function StockManager({ initialSlug }: { initialSlug?: string }) {
                           value={draft.stock_quantity}
                           onChange={(e) => setDraft(variant.id!, { stock_quantity: e.target.value })}
                         />
+                        {Number(variant.reserved_quantity) > 0 && (
+                          <span className="muted">
+                            {t("field.reserved_quantity")}: {formatNumber(plainNumber(variant.reserved_quantity!))}
+                          </span>
+                        )}
                       </td>
                       {PRICE_INPUTS.map((name) => (
                         <td key={name}>

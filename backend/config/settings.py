@@ -28,6 +28,7 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt.token_blacklist",
     "accounts",
     "catalog",
+    "commerce",
 ]
 
 MIDDLEWARE = [
@@ -96,6 +97,29 @@ MEDIA_MIN_DIMENSION = int(os.environ.get("MEDIA_MIN_DIMENSION", 50))
 MEDIA_MAX_DIMENSION = int(os.environ.get("MEDIA_MAX_DIMENSION", 6000))
 MEDIA_WEBP_QUALITY = int(os.environ.get("MEDIA_WEBP_QUALITY", 82))
 MEDIA_TEMPORARY_RETENTION_HOURS = int(os.environ.get("MEDIA_TEMPORARY_RETENTION_HOURS", 24))
+
+# Customer OTP login (see README "Customer authentication"). SMS_SENDER selects the SMS provider implementation.
+OTP_LENGTH = int(os.environ.get("OTP_LENGTH", 6))
+OTP_TTL_SECONDS = int(os.environ.get("OTP_TTL_SECONDS", 120))
+OTP_RESEND_SECONDS = int(os.environ.get("OTP_RESEND_SECONDS", 60))
+OTP_MAX_ATTEMPTS = int(os.environ.get("OTP_MAX_ATTEMPTS", 5))
+SMS_SENDER = os.environ.get("SMS_SENDER", "accounts.services.sms.console.ConsoleSmsSender")
+
+# Orders: stock is reserved at final confirmation for ORDER_RESERVATION_MINUTES (covers the bank session).
+ORDER_RESERVATION_MINUTES = int(os.environ.get("ORDER_RESERVATION_MINUTES", 15))
+PAYMENT_GATEWAY = os.environ.get("PAYMENT_GATEWAY", "commerce.services.payment_gateway.sandbox.SandboxPaymentGateway")
+PAYMENT_GATEWAY_SECRET = os.environ.get("PAYMENT_GATEWAY_SECRET", "")
+PAYMENT_GATEWAY_URL = os.environ.get("PAYMENT_GATEWAY_URL", "http://localhost:3000/payment/sandbox")
+
+# Celery: worker + beat release expired reservations (commerce.tasks.release_expired_reservations).
+CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6380/0")
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_BEAT_SCHEDULE = {
+    "release-expired-reservations": {
+        "task": "commerce.tasks.release_expired_reservations",
+        "schedule": float(os.environ.get("RESERVATION_EXPIRY_INTERVAL_SECONDS", 30)),
+    },
+}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

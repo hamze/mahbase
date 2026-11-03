@@ -18,6 +18,15 @@ services:
     networks:
       - mahbase
 
+  # Celery broker for the reservation-expiry schedule and asynchronous gateway refunds.
+  redis:
+    image: redis:7-alpine
+    container_name: mahbase-redis
+    ports:
+      - "${REDIS_HOST_PORT:-6380}:6379"
+    networks:
+      - mahbase
+
   backend:
     build: ./backend
     container_name: mahbase-backend
@@ -26,6 +35,7 @@ services:
       POSTGRES_HOST: db
       POSTGRES_PORT: "5432"
       DJANGO_MEDIA_ROOT: /srv/media
+      CELERY_BROKER_URL: redis://redis:6379/0
     volumes:
       - media-data:/srv/media
       - static-data:/app/staticfiles
@@ -34,6 +44,38 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - mahbase
+
+  # Worker and beat expose no endpoint, so they have no host port mapping.
+  worker:
+    build: ./backend
+    container_name: mahbase-worker
+    command: celery -A config worker --loglevel=INFO
+    env_file: .env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      CELERY_BROKER_URL: redis://redis:6379/0
+    depends_on:
+      - backend
+      - redis
+    networks:
+      - mahbase
+
+  beat:
+    build: ./backend
+    container_name: mahbase-beat
+    command: celery -A config beat --loglevel=INFO --schedule /tmp/celerybeat-schedule
+    env_file: .env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      CELERY_BROKER_URL: redis://redis:6379/0
+    depends_on:
+      - redis
     networks:
       - mahbase
 

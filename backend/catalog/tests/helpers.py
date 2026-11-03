@@ -8,10 +8,13 @@ from catalog.models import Attribute, AttributeOption, Brand, Category, Product,
 from catalog.permissions import RBAC_PERMISSIONS
 
 
-def make_staff(username: str, permissions: tuple[str, ...] = RBAC_PERMISSIONS) -> User:
+def make_staff(username: str, permissions: tuple[str, ...] = tuple(RBAC_PERMISSIONS)) -> User:
     user = User.objects.create_user(username=username, password="pw", is_staff=True)
-    codenames = [name.replace(".", "_") for name in permissions]
-    user.user_permissions.set(Permission.objects.filter(content_type__app_label="catalog", codename__in=codenames))
+    permission_ids = [
+        Permission.objects.get(content_type__app_label=RBAC_PERMISSIONS[name], codename=name.replace(".", "_")).pk
+        for name in permissions
+    ]
+    user.user_permissions.set(permission_ids)
     return user
 
 

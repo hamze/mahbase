@@ -12,7 +12,11 @@ logger = logging.getLogger(__name__)
 
 
 def exception_handler(exc: Exception, context: dict) -> Response | None:
-    """Map model-level validation to 400 and constraint races (e.g. duplicate combination) to 409."""
+    """Map model-level validation to 400, and constraint races and invalid state transitions to 409."""
+    from commerce.models import InvalidTransition
+
+    if isinstance(exc, InvalidTransition):
+        return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
     if isinstance(exc, DjangoValidationError):
         exc = ValidationError(as_serializer_error(exc))
     elif isinstance(exc, IntegrityError):
