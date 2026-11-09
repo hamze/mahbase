@@ -10,12 +10,20 @@ export type CatalogResource =
   | "admin/discount-codes"
   | "admin/shipping-methods"
   | "admin/faq-categories"
-  | "admin/faqs";
+  | "admin/faqs"
+  | "admin/blog/categories"
+  | "admin/banners"
+  | "admin/provinces"
+  | "admin/cities";
 
-/** Fetch every row of a metadata list (admin catalogs are small); optionally scoped to a category. */
-export async function listAll<T>(resource: CatalogResource, category?: number): Promise<T[]> {
+/** Fetch every row of a metadata list (admin catalogs are small); optionally scoped to a category or filtered. */
+export async function listAll<T>(
+  resource: CatalogResource,
+  category?: number,
+  filters: Record<string, string> = {},
+): Promise<T[]> {
   const page = await apiRequest<Page<T>>(resource, {
-    query: { page_size: "500", category: category ? String(category) : undefined },
+    query: { page_size: "500", category: category ? String(category) : undefined, ...filters },
   });
   return page.results;
 }

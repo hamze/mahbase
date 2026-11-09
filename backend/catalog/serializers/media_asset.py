@@ -1,8 +1,23 @@
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
+from rest_framework.exceptions import PermissionDenied
 
+from accounts.permissions import has_permission
+from blog.models import BlogPost
 from catalog.models import Brand, Category, MediaAsset, Product
+from catalog.models.media_asset import OWNER_FIELDS
+from commerce.models import Banner, StoreSettings
+
+# Uploading straight to an owner is a write on that owner, so it needs the owner's own write codes.
+OWNER_WRITE_PERMISSIONS = {
+    "product": ("media.manage", "products.create", "products.edit"),
+    "brand": ("brands.manage",),
+    "category": ("categories.manage",),
+    "blog_post": ("blog.create", "blog.edit"),
+    "banner": ("banners.manage",),
+    "store_setting": ("settings.edit",),
+}
 
 
 class MediaAssetSerializer(serializers.ModelSerializer):
@@ -11,7 +26,7 @@ class MediaAssetSerializer(serializers.ModelSerializer):
     class Meta:
         model = MediaAsset
         fields = ["id", "url", "alt_text", "image_type", "sort_order", "width", "height",
-                  "product", "brand", "category"]
+                  "product", "brand", "category", "blog_post", "banner", "store_setting"]
         read_only_fields = fields
 
     def get_url(self, asset: MediaAsset) -> str:
@@ -26,18 +41,27 @@ class MediaUploadSerializer(serializers.ModelSerializer):
     product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all(), required=False, allow_null=True)
     brand = serializers.PrimaryKeyRelatedField(queryset=Brand.objects.all(), required=False, allow_null=True)
     category = serializers.PrimaryKeyRelatedField(queryset=Category.objects.all(), required=False, allow_null=True)
+    blog_post = serializers.PrimaryKeyRelatedField(queryset=BlogPost.objects.all(), required=False, allow_null=True)
+    banner = serializers.PrimaryKeyRelatedField(queryset=Banner.objects.all(), required=False, allow_null=True)
+    store_setting = serializers.PrimaryKeyRelatedField(
+        queryset=StoreSettings.objects.all(), required=False, allow_null=True
+    )
 
     class Meta:
         model = MediaAsset
-        fields = ["file", "alt_text", "image_type", "product", "brand", "category"]
+        fields = ["file", "alt_text", "image_type", *OWNER_FIELDS]
 
     def validate(self, attrs: dict) -> dict:
-        owners = [attrs.get(name) for name in ("product", "brand", "category")]
-        if not any(owners):
+        owners = {name: attrs[name].pk for name in OWNER_FIELDS if attrs.get(name)}
+        if not owners:
             attrs["image_type"] = MediaAsset.ImageType.TEMPORARY
-        error = MediaAsset.owner_type_error(attrs.get("image_type", ""), *[o.pk if o else None for o in owners])
+        error = MediaAsset.owner_type_error(attrs.get("image_type", ""), owners)
         if error:
             raise serializers.ValidationError({"image_type": error})
+        user = self.context["request"].user
+        for name in owners:
+            if not any(has_permission(user, code) for code in OWNER_WRITE_PERMISSIONS[name]):
+                raise PermissionDenied(f"You do not have permission to attach media to this {name}.")
         attrs["file"] = MediaAsset.convert_upload(attrs["file"])
         return attrs
 

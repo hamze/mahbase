@@ -71,3 +71,33 @@ class MediaCleanupTests(TestCase):
         expired.refresh_from_db()
         self.assertEqual(expired.image_type, MediaAsset.ImageType.TEMPORARY)
         self.assertEqual(cleanup_temporary_media(), 1)
+
+
+class MediaOwnershipConstraintTests(TestCase):
+    """The database check accepts each new type only with its own owner and exactly one owner."""
+
+    def test_new_owner_types_require_exactly_their_owner(self) -> None:
+        from django.db import IntegrityError, transaction
+
+        from blog.models import BlogCategory, BlogPost
+        from catalog.tests.helpers import make_staff
+        from commerce.models import Banner, StoreSettings
+
+        upload = MediaAsset.objects.create(file=png_upload(), temporary_since=timezone.now())
+        post = BlogPost.objects.create(
+            title="p", slug="p", category=BlogCategory.objects.create(name="c", slug="c"), author=make_staff("a")
+        )
+        banner = Banner.objects.create(title="b", image=upload, position="HERO")
+        store = StoreSettings.get_solo()
+
+        valid = [("blog_cover", {"blog_post": post}), ("banner_image", {"banner": banner}),
+                 ("store_logo", {"store_setting": store}), ("trust_badge", {"store_setting": store})]
+        invalid = [("blog_cover", {"banner": banner}), ("banner_image", {}), ("temporary", {"blog_post": post}),
+                   ("store_logo", {"store_setting": store, "banner": banner})]
+        for image_type, owners in valid:
+            MediaAsset.objects.filter(pk=upload.pk).update(image_type=image_type, **owners)
+            MediaAsset.release(pk=upload.pk)
+        for image_type, owners in invalid:
+            with self.subTest(image_type=image_type, owners=list(owners)), self.assertRaises(IntegrityError):
+                with transaction.atomic():
+                    MediaAsset.objects.filter(pk=upload.pk).update(image_type=image_type, **owners)

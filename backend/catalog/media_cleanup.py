@@ -6,6 +6,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from catalog.models import MediaAsset
+from catalog.models.media_asset import OWNER_FIELDS
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +21,7 @@ def cleanup_temporary_media() -> int:
     cutoff = timezone.now() - timedelta(hours=settings.MEDIA_TEMPORARY_RETENTION_HOURS)
     expired = {
         "image_type": MediaAsset.ImageType.TEMPORARY,
-        "product__isnull": True,
-        "brand__isnull": True,
-        "category__isnull": True,
+        **{f"{name}__isnull": True for name in OWNER_FIELDS},
         "temporary_since__lt": cutoff,
     }
     candidate_ids = list(MediaAsset.objects.filter(**expired).values_list("pk", flat=True))

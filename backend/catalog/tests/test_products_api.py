@@ -8,6 +8,7 @@ from rest_framework.test import APIClient
 
 from catalog.models import Brand, Category, MediaAsset, Product, ProductVariant, Tag, Unit
 from catalog.tests.helpers import CatalogFixture, make_staff, png_upload
+from commerce.models import StoreSettings
 
 
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp())
@@ -182,6 +183,16 @@ class ProductApiTests(TestCase):
         released = MediaAsset.objects.get(pk=first["id"])
         self.assertEqual((released.image_type, released.category_id), ("temporary", None))
 
+    def test_upload_accepts_new_owner_types(self) -> None:
+        settings = StoreSettings.get_solo()
+        response = self.client.post(
+            "/api/media/upload/",
+            {"file": png_upload(), "store_setting": settings.pk, "image_type": "trust_badge"},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual((response.data["image_type"], response.data["store_setting"]), ("trust_badge", settings.pk))
+
     def test_update_detaches_removed_media_and_ignores_other_products_assets(self) -> None:
         product = self.data.create_product()
         other = Product.objects.create(name="Other", slug="other", category=self.data.category, unit=self.data.unit)
@@ -235,6 +246,16 @@ class PermissionTests(TestCase):
 
         self.client.force_authenticate(User.objects.create_user(username="customer", password="pw"))
         self.assertEqual(self.client.get("/api/products/").status_code, 403)
+
+    def test_any_of_codes_grant_product_reads_and_blog_uploads(self) -> None:
+        self.client.force_authenticate(make_staff("blogger", ("blog.edit",)))
+        self.assertEqual(self.client.get("/api/products/").status_code, 403)
+        upload = self.client.post("/api/media/upload/", {"file": png_upload()}, format="multipart")
+        self.assertEqual(upload.status_code, 201, upload.data)
+
+        self.client.force_authenticate(make_staff("stocker", ("products.edit_stock",)))
+        self.assertEqual(self.client.get("/api/products/").status_code, 200)
+        self.assertEqual(self.client.post("/api/media/upload/", {"file": png_upload()}, format="multipart").status_code, 403)
 
 
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp())

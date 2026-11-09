@@ -19,13 +19,22 @@ class DiscountCodeSerializer(ModelCleanSerializer):
         return normalize_mobile(value) if value else value
 
 
+SINGLE_CODE_ONLY_FIELDS = ("specific_mobile", "usage_limit_total", "per_user_limit")
+
+
 class DiscountCodeGenerateSerializer(DiscountCodeSerializer):
-    """Bulk generation of ``count`` single-use codes sharing the given settings (``code`` is used as the prefix)."""
+    """Bulk generation of ``count`` single-use codes sharing the given settings (``code`` is used as the prefix).
+
+    Generated codes are for anyone and single-use, so the mobile and usage-limit fields are not accepted.
+    """
 
     count = serializers.IntegerField(min_value=1, max_value=1000)
 
     class Meta(DiscountCodeSerializer.Meta):
-        fields = [*DiscountCodeSerializer.Meta.fields, "count"]
+        fields = [
+            *(f for f in DiscountCodeSerializer.Meta.fields if f not in SINGLE_CODE_ONLY_FIELDS),
+            "count",
+        ]
         extra_kwargs = {"code": {"validators": [], "required": False, "allow_blank": True}}
 
 

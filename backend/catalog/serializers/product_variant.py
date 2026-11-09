@@ -4,8 +4,8 @@ from django.db import transaction
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
 
+from accounts.permissions import has_permission
 from catalog.models import Attribute, Category, Product, ProductVariant
-from catalog.permissions import has_rbac_permission
 from catalog.serializers.attribute_value import AttributeValueSerializer, as_pairs
 from catalog.serializers.base import ModelCleanSerializer
 
@@ -34,12 +34,12 @@ class ProductVariantSerializer(ModelCleanSerializer):
     def validate(self, attrs: dict) -> dict:
         attrs = super().validate(attrs)
         user = self.context["request"].user
-        if self._changes(attrs, PRICE_FIELDS) and not has_rbac_permission(user, "products.edit_price"):
+        if self._changes(attrs, PRICE_FIELDS) and not has_permission(user, "products.edit_price"):
             raise PermissionDenied("You do not have permission to edit prices.")
         if self._changes(attrs, ["stock_quantity"]):
             if self.instance is not None:
                 raise serializers.ValidationError({"stock_quantity": "Use the stock endpoint to change stock."})
-            if not has_rbac_permission(user, "products.edit_stock"):
+            if not has_permission(user, "products.edit_stock"):
                 raise PermissionDenied("You do not have permission to edit stock.")
         product = self.context.get("product")
         if product is not None:

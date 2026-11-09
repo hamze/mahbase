@@ -5,7 +5,8 @@ import { listCities } from "@/lib/api/commerce";
 import { t } from "@/lib/i18n/fa";
 import { formatNumber } from "@/lib/pricing";
 
-const loadCities = async () => (await listCities()).map((city) => ({ value: city.id, label: city.name }));
+const loadCities = async () =>
+  (await listCities()).map((city) => ({ value: city.id, label: `${city.province_name} › ${city.name}` }));
 
 export default function ShippingPage() {
   return (

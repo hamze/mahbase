@@ -57,9 +57,17 @@ h2, h3 { font-weight: 700; }
   display: inline-flex; align-items: center; justify-content: center;
   background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; font-weight: 800;
 }
-.nav { display: flex; flex-direction: column; gap: 14px; }
+.nav { display: flex; flex-direction: column; gap: 4px; }
 .nav-group { display: flex; flex-direction: column; gap: 2px; }
-.nav-group-label { font-size: 0.75rem; color: var(--sidebar-muted); padding: 4px 12px; font-weight: 600; }
+.nav-group-label {
+  display: flex; align-items: center; justify-content: space-between; width: 100%;
+  font: inherit; font-size: 0.78rem; font-weight: 600; color: var(--sidebar-muted);
+  padding: 8px 12px; background: transparent; border: 0; border-radius: var(--radius-sm); cursor: pointer;
+}
+.nav-group-label:hover { background: rgba(255, 255, 255, 0.06); color: #fff; }
+.nav-group-label.open { color: #fff; }
+.nav .nav-group-label svg { width: 14px; height: 14px; transition: transform 0.15s; }
+.nav .nav-group-label.open svg { transform: rotate(180deg); }
 .nav a {
   display: flex; align-items: center; gap: 10px;
   padding: 9px 12px; border-radius: var(--radius-sm);
@@ -260,6 +268,51 @@ p.errors { padding: 10px 14px; }
 .thumbs { display: flex; gap: 12px; flex-wrap: wrap; }
 .thumbs figure { margin: 0; width: 132px; display: flex; flex-direction: column; gap: 4px; }
 .thumbs img { width: 132px; height: 100px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--border); }
+
+/* ---- Group permissions ---- */
+.module-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; align-items: start;
+  margin-bottom: 20px;
+}
+@media (min-width: 1200px) { .module-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.module-grid > .card { margin: 0; padding: 16px; }
+.module-grid summary { cursor: pointer; }
+.permission-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.permission-list label.inline {
+  align-items: flex-start; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.permission-list label.inline input { margin-top: 3px; flex-shrink: 0; }
+.permission-list .permission-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.permission-list .permission-text .muted { font-size: 0.78rem; overflow-wrap: anywhere; }
+
+/* ---- Provinces & cities ---- */
+.geo-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+.geo-cities { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow-y: auto; }
+.geo-cities h2 { margin-top: 0; }
+@media (max-width: 1100px) {
+  .geo-layout { grid-template-columns: 1fr; }
+  .geo-cities { position: static; max-height: none; }
+}
+
+/* ---- Jalali date picker ---- */
+.jdp { position: relative; }
+.jdp-trigger { width: 100%; text-align: start; font-weight: 400; }
+.jdp-popover {
+  position: absolute; z-index: 20; top: calc(100% + 4px); inset-inline-start: 0; width: 290px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14); padding: 12px;
+}
+.jdp-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.jdp-header button { padding: 4px 8px; }
+.jdp-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; }
+.jdp-weekday { font-size: 0.78rem; color: var(--muted); padding: 4px 0; }
+.jdp-day { padding: 6px 0; border-color: transparent; font-weight: 400; }
+.jdp-day.today { border-color: var(--primary); }
+.jdp-day.selected, .jdp-day.selected:hover { background: var(--primary); border-color: var(--primary); color: #fff; }
+.jdp-time { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 10px; }
+.jdp-time select { padding: 4px 8px; }
+.jdp-footer { margin-top: 10px; justify-content: space-between; }
 
 /* ---- Login ---- */
 .login-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; background: radial-gradient(circle at top, #eef2ff, var(--bg) 60%); }

@@ -11,4 +11,17 @@ class MediaUploadViewSet(mixins.CreateModelMixin, viewsets.GenericViewSet):
     queryset = MediaAsset.objects.all()
     serializer_class = MediaUploadSerializer
     parser_classes = [MultiPartParser, FormParser]
-    rbac_permissions = {"create": "media.manage"}
+    # Every editor that attaches images (products, categories, brands, blog, banners, settings) uploads through this endpoint.
+    rbac_permissions = {
+        "create": (
+            "media.manage",
+            "products.create",
+            "products.edit",
+            "categories.manage",
+            "brands.manage",
+            "blog.create",
+            "blog.edit",
+            "banners.manage",
+            "settings.edit",
+        )
+    }

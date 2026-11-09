@@ -6,11 +6,11 @@ from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework_simplejwt.tokens import RefreshToken
 
 from accounts.models import OTPCode, UserProfile
 from accounts.serializers import MobileSerializer, OTPVerifySerializer
 from accounts.services.sms.provider import get_sms_sender
+from accounts.tokens import PermissionRefreshToken
 
 
 class OTPRequestView(APIView):
@@ -46,6 +46,6 @@ class OTPVerifyView(APIView):
             user = UserProfile.create_customer(mobile, UserProfile.CreatedSource.SELF_SIGNUP)
         if not user.is_active:
             return Response({"detail": "This account is inactive."}, status=status.HTTP_403_FORBIDDEN)
-        refresh = RefreshToken.for_user(user)
+        refresh = PermissionRefreshToken.for_user(user)
         user_logged_in.send(sender=User, request=request._request, user=user)
         return Response({"access": str(refresh.access_token), "refresh": str(refresh)})

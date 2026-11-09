@@ -1,6 +1,5 @@
 import io
 import uuid
-from typing import TYPE_CHECKING
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -11,21 +10,23 @@ from django.db.models import Q
 from django.utils import timezone
 from PIL import Image, UnidentifiedImageError
 
-if TYPE_CHECKING:
-    from catalog.models import Brand, Category, Product
-
 ALLOWED_IMAGE_FORMATS ={"JPEG", "PNG", "WEBP", "GIF"}
+
+# Owner foreign key → upload folder. Every non-temporary asset has exactly one of these set.
+OWNER_FOLDERS = {
+    "product": "products",
+    "brand": "brands",
+    "category": "categories",
+    "blog_post": "blog",
+    "banner": "banners",
+    "store_setting": "store",
+}
+OWNER_FIELDS = tuple(OWNER_FOLDERS)
 
 
 def media_upload_to(instance: "MediaAsset", filename: str) -> str:
-    if instance.product_id:
-        folder = f"products/{instance.product_id}"
-    elif instance.brand_id:
-        folder = f"brands/{instance.brand_id}"
-    elif instance.category_id:
-        folder = f"categories/{instance.category_id}"
-    else:
-        folder = "temporary"
+    owner = next((name for name in OWNER_FIELDS if getattr(instance, f"{name}_id")), None)
+    folder = f"{OWNER_FOLDERS[owner]}/{getattr(instance, f'{owner}_id')}" if owner else "temporary"
     return f"{folder}/{filename}"
 
 
@@ -37,9 +38,25 @@ class MediaAsset(models.Model):
         DESCRIPTION = "description", "Description"
         BRAND_LOGO = "brand_logo", "Brand logo"
         CATEGORY_ICON = "category_icon", "Category icon"
+        BLOG_COVER = "blog_cover", "Blog cover"
+        BLOG_CONTENT = "blog_content", "Blog content"
+        BANNER_IMAGE = "banner_image", "Banner image"
+        STORE_LOGO = "store_logo", "Store logo"
+        TRUST_BADGE = "trust_badge", "Trust badge"
         TEMPORARY = "temporary", "Temporary"
 
     PRODUCT_TYPES = (ImageType.THUMBNAIL, ImageType.MAIN, ImageType.GALLERY, ImageType.DESCRIPTION)
+    # The one owner foreign key each non-temporary type requires.
+    OWNER_OF_TYPE = {
+        **{image_type: "product" for image_type in PRODUCT_TYPES},
+        ImageType.BRAND_LOGO: "brand",
+        ImageType.CATEGORY_ICON: "category",
+        ImageType.BLOG_COVER: "blog_post",
+        ImageType.BLOG_CONTENT: "blog_post",
+        ImageType.BANNER_IMAGE: "banner",
+        ImageType.STORE_LOGO: "store_setting",
+        ImageType.TRUST_BADGE: "store_setting",
+    }
 
     file = models.ImageField(upload_to=media_upload_to, width_field="width", height_field="height")
     width = models.PositiveIntegerField(default=0)
@@ -56,6 +73,15 @@ class MediaAsset(models.Model):
     category = models.ForeignKey(
         "catalog.Category", null=True, blank=True, on_delete=models.PROTECT, related_name="media"
     )
+    blog_post = models.ForeignKey(
+        "blog.BlogPost", null=True, blank=True, on_delete=models.PROTECT, related_name="media"
+    )
+    banner = models.ForeignKey(
+        "commerce.Banner", null=True, blank=True, on_delete=models.PROTECT, related_name="media"
+    )
+    store_setting = models.ForeignKey(
+        "commerce.StoreSettings", null=True, blank=True, on_delete=models.PROTECT, related_name="media"
+    )
     temporary_since = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -67,15 +93,22 @@ class MediaAsset(models.Model):
             models.CheckConstraint(
                 name="media_asset_type_matches_owner",
                 condition=(
-                    Q(image_type="temporary", product__isnull=True, brand__isnull=True, category__isnull=True)
+                    Q(image_type="temporary", **{f"{name}__isnull": True for name in OWNER_FIELDS})
                     | Q(
                         image_type__in=["thumbnail", "main", "gallery", "description"],
-                        product__isnull=False,
-                        brand__isnull=True,
-                        category__isnull=True,
+                        **{f"{name}__isnull": name != "product" for name in OWNER_FIELDS},
                     )
-                    | Q(image_type="brand_logo", product__isnull=True, brand__isnull=False, category__isnull=True)
-                    | Q(image_type="category_icon", product__isnull=True, brand__isnull=True, category__isnull=False)
+                    | Q(image_type="brand_logo", **{f"{name}__isnull": name != "brand" for name in OWNER_FIELDS})
+                    | Q(image_type="category_icon", **{f"{name}__isnull": name != "category" for name in OWNER_FIELDS})
+                    | Q(
+                        image_type__in=["blog_cover", "blog_content"],
+                        **{f"{name}__isnull": name != "blog_post" for name in OWNER_FIELDS},
+                    )
+                    | Q(image_type="banner_image", **{f"{name}__isnull": name != "banner" for name in OWNER_FIELDS})
+                    | Q(
+                        image_type__in=["store_logo", "trust_badge"],
+                        **{f"{name}__isnull": name != "store_setting" for name in OWNER_FIELDS},
+                    )
                 ),
             ),
         ]
@@ -85,23 +118,20 @@ class MediaAsset(models.Model):
         return self.file.name
 
     @classmethod
-    def owner_type_error(cls, image_type: str, product_id: int | None, brand_id: int | None,
-                         category_id: int | None) -> str | None:
-        owners = [o for o in (product_id, brand_id, category_id) if o is not None]
+    def owner_type_error(cls, image_type: str, owners: dict[str, int | None]) -> str | None:
+        """``owners`` maps owner field names to ids (missing names count as unset)."""
+        set_owners = [name for name in OWNER_FIELDS if owners.get(name) is not None]
         if image_type == cls.ImageType.TEMPORARY:
-            return "Temporary media cannot have an owner." if owners else None
-        if len(owners) != 1:
+            return "Temporary media cannot have an owner." if set_owners else None
+        if len(set_owners) != 1:
             return "Active media must have exactly one owner."
-        if image_type in cls.PRODUCT_TYPES and product_id is None:
-            return f"Image type '{image_type}' can only belong to a product."
-        if image_type == cls.ImageType.BRAND_LOGO and brand_id is None:
-            return "Brand logos can only belong to a brand."
-        if image_type == cls.ImageType.CATEGORY_ICON and category_id is None:
-            return "Category icons can only belong to a category."
+        required = cls.OWNER_OF_TYPE.get(image_type)
+        if set_owners[0] != required:
+            return f"Image type '{image_type}' can only belong to a {required}."
         return None
 
     def clean(self) -> None:
-        error = self.owner_type_error(self.image_type, self.product_id, self.brand_id, self.category_id)
+        error = self.owner_type_error(self.image_type, {name: getattr(self, f"{name}_id") for name in OWNER_FIELDS})
         if error:
             raise ValidationError({"image_type": error})
 
@@ -133,15 +163,8 @@ class MediaAsset(models.Model):
         return ContentFile(buffer.getvalue(), name=f"{uuid.uuid4().hex}.webp")
 
     @classmethod
-    def claim(
-        cls,
-        items: list[tuple[int, str]],
-        *,
-        product: "Product | None" = None,
-        brand: "Brand | None" = None,
-        category: "Category | None" = None,
-    ) -> None:
-        """Attach temporary assets to one owner; must run inside the caller's transaction.
+    def claim(cls, items: list[tuple[int, str]], **owner: models.Model) -> None:
+        """Attach temporary assets to one owner (e.g. ``product=product``); must run inside the caller's transaction.
 
         Rows are locked so a concurrent cleanup or claim cannot take the same asset.
         """
@@ -159,20 +182,17 @@ class MediaAsset(models.Model):
             asset = assets[asset_id]
             asset.image_type = image_type
             asset.sort_order = position
-            asset.product = product
-            asset.brand = brand
-            asset.category = category
+            for name in OWNER_FIELDS:
+                setattr(asset, name, owner.get(name))
             asset.temporary_since = None
             asset.full_clean(exclude=["file"])
-            asset.save(update_fields=["image_type", "sort_order", "product", "brand", "category", "temporary_since"])
+            asset.save(update_fields=["image_type", "sort_order", *OWNER_FIELDS, "temporary_since"])
 
     @classmethod
     def release(cls, **filters: object) -> None:
         """Turn owned media back into temporary uploads so retention cleanup removes the files."""
         cls.objects.filter(**filters).update(
             image_type=cls.ImageType.TEMPORARY,
-            product=None,
-            brand=None,
-            category=None,
             temporary_since=timezone.now(),
+            **{name: None for name in OWNER_FIELDS},
         )

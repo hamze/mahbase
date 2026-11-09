@@ -4,6 +4,7 @@ import { ReactNode, useCallback, useEffect, useState } from "react";
 
 import { Guide } from "@/components/Guide";
 import { FieldLabel } from "@/components/InfoTip";
+import { dateToIso, isoToDate, JalaliDatePicker } from "@/components/JalaliDatePicker";
 import { Messages } from "@/components/Messages";
 import { MultiSelect } from "@/components/MultiSelect";
 import { CatalogResource, createItem, deleteItem, listAll, updateItem } from "@/lib/api/catalog";
@@ -39,6 +40,8 @@ export type FieldDef = {
   help?: string;
   /** "categories" fields: text shown while nothing is selected. */
   placeholder?: MessageKey;
+  /** Shown only while this returns true for the current form (e.g. depends on a type field). */
+  showIf?: (form: Form) => boolean;
 };
 
 export type ColumnDef = { label: MessageKey; render: (row: Row, lookup: CategoryLookup) => ReactNode };
@@ -54,17 +57,26 @@ type Props = {
   columns: ColumnDef[];
   emptyForm: Form;
   showExample?: boolean;
+  /** Extra list filters; pass a stable (memoized) object. */
+  query?: Record<string, string>;
+  /** Maps a listed row to the edit form when they differ (e.g. one input for two API fields). */
+  toForm?: (row: Row) => Form;
+  /** Replaces the default create request (e.g. bulk creation); returns the notice to show. */
+  create?: (payload: Form) => Promise<string>;
   /** Runs before create/update with the chosen image files (e.g. upload a temporary brand logo). */
   beforeSave?: (form: Form, files: Record<string, File>) => Promise<Form>;
   /** Runs after create/update (e.g. upload a category icon owned by the saved row). */
   afterSave?: (saved: Row, files: Record<string, File>) => Promise<void>;
+  /** Extra buttons on the same line as edit/delete. */
+  rowActions?: (row: Row) => ReactNode;
+  /** Larger per-row content rendered below the action buttons. */
   rowExtra?: (row: Row, reload: () => void) => ReactNode;
 };
 
 /** Generic list + form for catalog metadata and simple admin resources (discount codes, shipping, FAQ) with the
  * section guide, RBAC-aware controls and deactivation feedback. */
 export function ResourceManager(props: Props) {
-  const { resource, section, permission, fields, columns, emptyForm } = props;
+  const { resource, section, permission, fields, columns, emptyForm, query } = props;
   const can = useCan();
   const canManage = can(permission);
   const needsCategories = fields.some((field) => field.kind === "parentCategory" || field.kind === "categories");
@@ -78,9 +90,9 @@ export function ResourceManager(props: Props) {
   const [notice, setNotice] = useState<string>();
 
   const reload = useCallback(async () => {
-    setRows(await listAll<Row>(resource));
+    setRows(await listAll<Row>(resource, undefined, query));
     if (needsCategories) setCategories(await listAll<Category>("categories"));
-  }, [resource, needsCategories]);
+  }, [resource, needsCategories, query]);
 
   useEffect(() => {
     reload().catch((error) => setErrors(errorMessages(error)));
@@ -105,6 +117,12 @@ export function ResourceManager(props: Props) {
     setErrors([]);
     try {
       const payload = props.beforeSave ? await props.beforeSave(form, files) : form;
+      if (!form.id && props.create) {
+        setNotice(await props.create(payload));
+        setForm(null);
+        await reload();
+        return;
+      }
       const saved = (form.id
         ? await updateItem<Row>(resource, form.id as number, payload)
         : await createItem<Row>(resource, payload)) as Row;
@@ -230,15 +248,10 @@ export function ResourceManager(props: Props) {
         );
       case "datetime":
         return (
-          <label key={field.name}>
+          <div key={field.name} className="field">
             <FieldLabel field={field.name}>{t(field.label)}</FieldLabel>
-            <input
-              type="datetime-local"
-              dir="ltr"
-              value={toLocalInput(value)}
-              onChange={(e) => set(field.name, e.target.value ? new Date(e.target.value).toISOString() : null)}
-            />
-          </label>
+            <JalaliDatePicker withTime value={isoToDate(value)} onChange={(date) => set(field.name, dateToIso(date))} />
+          </div>
         );
       case "image":
         return (
@@ -285,7 +298,7 @@ export function ResourceManager(props: Props) {
       )}
       {form && (
         <div className="card">
-          <div className="form-grid">{fields.map(renderField)}</div>
+          <div className="form-grid">{fields.filter((field) => !field.showIf || field.showIf(form)).map(renderField)}</div>
           <div className="row" style={{ marginTop: 12 }}>
             <button className="primary" onClick={save}>
               {t("common.save")}
@@ -318,12 +331,19 @@ export function ResourceManager(props: Props) {
                   <td key={column.label}>{column.render(row, lookup)}</td>
                 ))}
                 <td>
-                  {canManage && (
+                  {(canManage || props.rowActions) && (
                     <div className="row">
-                      <button onClick={() => setForm({ ...row })}>{t("common.edit")}</button>
-                      <button className="danger" onClick={() => remove(row)}>
-                        {t("common.delete")}
-                      </button>
+                      {canManage && (
+                        <>
+                          <button onClick={() => setForm(props.toForm ? props.toForm(row) : { ...row })}>
+                            {t("common.edit")}
+                          </button>
+                          <button className="danger" onClick={() => remove(row)}>
+                            {t("common.delete")}
+                          </button>
+                        </>
+                      )}
+                      {props.rowActions?.(row)}
                     </div>
                   )}
                   {props.rowExtra?.(row, reload)}
@@ -335,13 +355,6 @@ export function ResourceManager(props: Props) {
       </div>
     </>
   );
-}
-
-/** ISO timestamp → value of a ``datetime-local`` input in the browser's time zone. */
-function toLocalInput(value: unknown): string {
-  if (!value) return "";
-  const date = new Date(String(value));
-  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
 
 /** Brands and tags without categories apply to all categories. */

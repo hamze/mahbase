@@ -29,6 +29,7 @@ INSTALLED_APPS = [
     "accounts",
     "catalog",
     "commerce",
+    "blog",
 ]
 
 MIDDLEWARE = [
@@ -105,6 +106,9 @@ OTP_RESEND_SECONDS = int(os.environ.get("OTP_RESEND_SECONDS", 60))
 OTP_MAX_ATTEMPTS = int(os.environ.get("OTP_MAX_ATTEMPTS", 5))
 SMS_SENDER = os.environ.get("SMS_SENDER", "accounts.services.sms.console.ConsoleSmsSender")
 
+# Slugs of internal pages linked from the storefront menu; deleting such a page is refused.
+SITE_MENU_INTERNAL_PAGES = env_list("SITE_MENU_INTERNAL_PAGES", "")
+
 # Orders: stock is reserved at final confirmation for ORDER_RESERVATION_MINUTES (covers the bank session).
 ORDER_RESERVATION_MINUTES = int(os.environ.get("ORDER_RESERVATION_MINUTES", 15))
 PAYMENT_GATEWAY = os.environ.get("PAYMENT_GATEWAY", "commerce.services.payment_gateway.sandbox.SandboxPaymentGateway")
@@ -133,6 +137,20 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "catalog.pagination.CatalogPagination",
     "PAGE_SIZE": 50,
     "EXCEPTION_HANDLER": "catalog.exceptions.exception_handler",
+    # Contact-form spam guard at the API boundary (commerce.throttles), counted in the shared cache.
+    "DEFAULT_THROTTLE_RATES": {
+        "contact_ip": os.environ.get("CONTACT_RATE_IP", "1/min"),
+        "contact_mobile_minute": os.environ.get("CONTACT_RATE_MOBILE_MINUTE", "1/min"),
+        "contact_mobile_hour": os.environ.get("CONTACT_RATE_MOBILE_HOUR", "5/hour"),
+    },
+}
+
+# Shared cache (rate-limit counters must be shared by every backend process).
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": os.environ.get("CACHE_URL", "redis://localhost:6380/1"),
+    }
 }
 
 SIMPLE_JWT = {
@@ -142,6 +160,9 @@ SIMPLE_JWT = {
     "BLACKLIST_AFTER_ROTATION": True,
     "UPDATE_LAST_LOGIN": True,
     "AUTH_HEADER_TYPES": ("Bearer",),
+    # Tokens carry the resolved RBAC codes and is_superuser, re-resolved on every refresh (accounts.tokens).
+    "TOKEN_OBTAIN_SERIALIZER": "accounts.tokens.PermissionTokenObtainPairSerializer",
+    "TOKEN_REFRESH_SERIALIZER": "accounts.tokens.PermissionTokenRefreshSerializer",
 }
 
 LOGGING = {

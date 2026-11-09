@@ -20,7 +20,7 @@ ALLOWED_DESCRIPTION_PROTOCOLS = ["http", "https", "mailto"]
 
 
 def sanitize_html(value: str) -> str:
-    """Allowlist rich-text sanitization (product descriptions, FAQ answers, product question answers)."""
+    """The one rich-text allowlist: product descriptions, FAQ and question answers, blog content, store footer."""
     return bleach.clean(
         value,
         tags=ALLOWED_DESCRIPTION_TAGS,

@@ -12,7 +12,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   // The panel is for staff only; customers authenticate with OTP in the storefront.
   if (!user?.is_staff) redirect("/manage/login");
   return (
-    <PermissionsProvider permissions={user.permissions}>
+    <PermissionsProvider permissions={user.permissions} isSuperuser={user.is_superuser}>
       <div className="shell">
         <aside className="sidebar">
           <div className="brand">

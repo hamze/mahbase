@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
 import { useCan } from "@/lib/auth/permissions";
 import { MessageKey, t } from "@/lib/i18n/fa";
@@ -25,29 +26,45 @@ const ICONS = {
   shipping: "M1 4h14v12H1zM15 9h4l3 3v4h-7M5.5 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM18.5 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z",
   faqs: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01",
   audit: "M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9",
+  access: "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z",
+  blog: "M4 4h16v16H4zM8 8h8M8 12h8M8 16h5",
+  reviews: "M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z",
+  notifications: "M18 16V11a6 6 0 0 0-12 0v5l-2 2h16zM10 21h4",
+  contact: "M3 5h18v14H3zM3 5l9 7 9-7",
+  banners: "M3 5h18v14H3zM3 15l5-5 4 4 3-3 6 6",
+  geo: "M12 21s-7-6.2-7-12a7 7 0 0 1 14 0c0 5.8-7 12-7 12zM12 11.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z",
+  settings: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19 12l2-1-1-3-2 .2-1.5-1.5L16.7 4l-3-1-1 2h-1.4l-1-2-3 1 .2 2.7L6 8.2 4 8 3 11l2 1v1.4l-2 1 1 3 2-.2 1.5 1.5L7.3 20l3 1 1-2h1.4l1 2 3-1-.2-2.7 1.5-1.5 2 .2 1-3-2-1z",
 } as const;
 
-/** ``permission``: shown only when the user has it (Django enforces it on every request). */
+/** Menu manifest: each route declares the RBAC code that shows it (none = any staff user). Hiding is UX only;
+ * Django re-checks the permission on every request. */
 type Item = { href: string; label: MessageKey; icon: keyof typeof ICONS; permission?: string };
 
 const GROUPS: { label?: MessageKey; items: Item[] }[] = [
   { items: [{ href: "/manage", label: "nav.dashboard", icon: "dashboard" }] },
   {
+    label: "nav.groupAccess",
+    items: [
+      { href: "/manage/access/groups", label: "nav.accessGroups", icon: "access", permission: "access.view" },
+      { href: "/manage/access/users", label: "nav.accessUsers", icon: "users", permission: "access.manage_users" },
+    ],
+  },
+  {
     label: "nav.groupCatalog",
     items: [
-      { href: "/manage/categories", label: "nav.categories", icon: "categories" },
-      { href: "/manage/tags", label: "nav.tags", icon: "tags" },
-      { href: "/manage/brands", label: "nav.brands", icon: "brands" },
-      { href: "/manage/attributes", label: "nav.attributes", icon: "attributes" },
-      { href: "/manage/units", label: "nav.units", icon: "units" },
+      { href: "/manage/categories", label: "nav.categories", icon: "categories", permission: "categories.manage" },
+      { href: "/manage/tags", label: "nav.tags", icon: "tags", permission: "tags.manage" },
+      { href: "/manage/brands", label: "nav.brands", icon: "brands", permission: "brands.manage" },
+      { href: "/manage/attributes", label: "nav.attributes", icon: "attributes", permission: "attributes.manage" },
+      { href: "/manage/units", label: "nav.units", icon: "units", permission: "units.manage" },
     ],
   },
   {
     label: "nav.groupProducts",
     items: [
-      { href: "/manage/products", label: "nav.products", icon: "products" },
-      { href: "/manage/stock", label: "nav.stock", icon: "stock" },
-      { href: "/manage/pricing", label: "nav.pricing", icon: "pricing" },
+      { href: "/manage/products", label: "nav.products", icon: "products", permission: "products.view" },
+      { href: "/manage/stock", label: "nav.stock", icon: "stock", permission: "products.edit_stock" },
+      { href: "/manage/pricing", label: "nav.pricing", icon: "pricing", permission: "products.edit_price" },
     ],
   },
   {
@@ -59,6 +76,7 @@ const GROUPS: { label?: MessageKey; items: Item[] }[] = [
       { href: "/manage/returns", label: "nav.returns", icon: "refunds", permission: "admin.orders.view_all" },
       { href: "/manage/discounts", label: "nav.discounts", icon: "discounts", permission: "admin.discounts.manage" },
       { href: "/manage/shipping", label: "nav.shipping", icon: "shipping", permission: "admin.shipping.manage" },
+      { href: "/manage/geo", label: "nav.geo", icon: "geo", permission: "geo.manage" },
     ],
   },
   {
@@ -67,11 +85,24 @@ const GROUPS: { label?: MessageKey; items: Item[] }[] = [
       { href: "/manage/users", label: "nav.users", icon: "users", permission: "admin.users.view" },
       { href: "/manage/faqs", label: "nav.faqs", icon: "faqs", permission: "admin.faqs.manage" },
       { href: "/manage/questions", label: "nav.questions", icon: "faqs", permission: "admin.product_questions.answer" },
+      { href: "/manage/reviews", label: "nav.reviews", icon: "reviews", permission: "reviews.view" },
+      { href: "/manage/notifications", label: "nav.notifications", icon: "notifications", permission: "notifications.view" },
+      { href: "/manage/contact-messages", label: "nav.contactMessages", icon: "contact", permission: "contact_messages.view" },
       { href: "/manage/audit", label: "nav.audit", icon: "audit", permission: "admin.audit.view" },
+    ],
+  },
+  {
+    label: "nav.groupContent",
+    items: [
+      { href: "/manage/blog/categories", label: "nav.blogCategories", icon: "blog", permission: "blog.manage_categories" },
+      { href: "/manage/blog/posts", label: "nav.blogPosts", icon: "blog", permission: "blog.view" },
+      { href: "/manage/banners", label: "nav.banners", icon: "banners", permission: "banners.view" },
+      { href: "/manage/settings", label: "nav.settings", icon: "settings", permission: "settings.view" },
     ],
   },
 ];
 
+/** Accordion: only one labelled group is open at a time, initially the one holding the current page. */
 export function AdminNav() {
   const pathname = usePathname();
   const can = useCan();
@@ -80,23 +111,43 @@ export function AdminNav() {
   const activeHref = GROUPS.flatMap((group) => group.items.map((item) => item.href))
     .filter(matches)
     .sort((a, b) => b.length - a.length)[0];
-  const isActive = (href: string) => href === activeHref;
+  const activeGroup = GROUPS.findIndex((group) => group.items.some((item) => item.href === activeHref));
+  const [openGroup, setOpenGroup] = useState<number | null>(activeGroup);
+  useEffect(() => {
+    setOpenGroup(activeGroup);
+  }, [activeGroup]);
+
   return (
     <nav className="nav">
       {GROUPS.map((group, index) => {
         const items = group.items.filter((item) => !item.permission || can(item.permission));
-        return items.length === 0 ? null : (
-        <div key={index} className="nav-group">
-          {group.label && <div className="nav-group-label">{t(group.label)}</div>}
-          {items.map((item) => (
-            <Link key={item.href} href={item.href} className={isActive(item.href) ? "active" : undefined}>
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d={ICONS[item.icon]} />
-              </svg>
-              {t(item.label)}
-            </Link>
-          ))}
-        </div>
+        if (items.length === 0) return null;
+        const open = !group.label || openGroup === index;
+        return (
+          <div key={index} className="nav-group">
+            {group.label && (
+              <button
+                type="button"
+                className={`nav-group-label${open ? " open" : ""}`}
+                aria-expanded={open}
+                onClick={() => setOpenGroup(open ? null : index)}
+              >
+                {t(group.label)}
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
+            )}
+            {open &&
+              items.map((item) => (
+                <Link key={item.href} href={item.href} className={item.href === activeHref ? "active" : undefined}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d={ICONS[item.icon]} />
+                  </svg>
+                  {t(item.label)}
+                </Link>
+              ))}
+          </div>
         );
       })}
     </nav>

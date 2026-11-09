@@ -9,6 +9,7 @@ export type CurrentUser = {
   first_name: string;
   last_name: string;
   is_staff: boolean;
+  is_superuser: boolean;
   customer_tier: "RETAIL" | "WHOLESALE" | null;
   permissions: string[];
 };

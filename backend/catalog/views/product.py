@@ -16,7 +16,10 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     lookup_url_kwarg = "lookup"
     lookup_value_regex = "[^/]+"
+    # The stock and pricing pages read products too, so their codes also grant reads.
     rbac_permissions = {
+        "list": ("products.view", "products.edit_stock", "products.edit_price"),
+        "retrieve": ("products.view", "products.edit_stock", "products.edit_price"),
         "create": "products.create",
         "update": "products.edit",
         "partial_update": "products.edit",

@@ -36,6 +36,7 @@ services:
       POSTGRES_PORT: "5432"
       DJANGO_MEDIA_ROOT: /srv/media
       CELERY_BROKER_URL: redis://redis:6379/0
+      CACHE_URL: redis://redis:6379/1
     volumes:
       - media-data:/srv/media
       - static-data:/app/staticfiles

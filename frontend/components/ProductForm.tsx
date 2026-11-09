@@ -127,8 +127,9 @@ export function ProductForm({ product }: { product?: Product }) {
       media: [
         ...media.map(({ id, image_type }) => ({ id, image_type })),
         // Only images still present in the description are claimed; removed ones expire as temporary uploads.
+        // Matched on the unique file name so an absolute/relative or re-encoded src still keeps its image.
         ...descriptionImages
-          .filter((asset) => form.description_long.includes(asset.url))
+          .filter((asset) => form.description_long.includes(asset.url.split("/").pop()!))
           .map((asset) => ({ id: asset.id, image_type: "description" as const })),
       ],
     };

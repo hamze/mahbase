@@ -1,20 +1,22 @@
 import io
 
-from django.contrib.auth.models import Permission, User
+from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from PIL import Image
 
+from accounts.models import Group, GroupMembership, Permission
+from accounts.permission_codes import BASELINE_PERMISSIONS
 from catalog.models import Attribute, AttributeOption, Brand, Category, Product, ProductVariant, Tag, Unit
-from catalog.permissions import RBAC_PERMISSIONS
 
 
-def make_staff(username: str, permissions: tuple[str, ...] = tuple(RBAC_PERMISSIONS)) -> User:
+def make_staff(
+    username: str, permissions: tuple[str, ...] = tuple(code for code, _, _ in BASELINE_PERMISSIONS)
+) -> User:
+    """Staff user in its own group holding exactly ``permissions`` (seeded codes from the data migration)."""
     user = User.objects.create_user(username=username, password="pw", is_staff=True)
-    permission_ids = [
-        Permission.objects.get(content_type__app_label=RBAC_PERMISSIONS[name], codename=name.replace(".", "_")).pk
-        for name in permissions
-    ]
-    user.user_permissions.set(permission_ids)
+    group = Group.objects.create(name=f"group-{username}", slug=f"group-{username}")
+    group.permissions.set(Permission.objects.filter(code__in=permissions))
+    GroupMembership.assign(user, group)
     return user
 
 

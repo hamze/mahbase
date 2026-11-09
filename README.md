@@ -60,7 +60,7 @@ npm install
 BACKEND_URL=http://localhost:8000 npm run dev             # http://localhost:3000/manage
 ```
 
-Checks: `python manage.py test catalog commerce` (needs PostgreSQL; the tests use row locks), `npm run lint`,
+Checks: `python manage.py test accounts blog catalog commerce` (needs PostgreSQL; the tests use row locks), `npm run lint`,
 `npm run build`.
 
 ## Roles and permissions

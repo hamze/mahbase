@@ -39,7 +39,19 @@ export type Attribute = {
   options: AttributeOption[];
 };
 
-export type MediaImageType = "thumbnail" | "main" | "gallery" | "description" | "brand_logo" | "category_icon" | "temporary";
+export type MediaImageType =
+  | "thumbnail"
+  | "main"
+  | "gallery"
+  | "description"
+  | "brand_logo"
+  | "category_icon"
+  | "blog_cover"
+  | "blog_content"
+  | "banner_image"
+  | "store_logo"
+  | "trust_badge"
+  | "temporary";
 
 export type MediaAsset = {
   id: number;
@@ -260,7 +272,7 @@ export type AuditEntry = {
   created_at: string;
 };
 
-export type City = { id: number; name: string; province: number };
+export type City = { id: number; name: string; province: number; province_name: string };
 
 export type StockBelowReserved = {
   warning: "stock_below_reserved";
@@ -319,3 +331,147 @@ export type AdminOrderCreate = {
 };
 
 export type OrderCreated = { order_number: string; payment_redirect_url: string; order: Order };
+
+export type AccessPermission = {
+  id: number;
+  code: string;
+  label_fa: string;
+  module: string;
+  description_fa: string | null;
+  is_active: boolean;
+};
+
+export type AccessGroup = {
+  id: number;
+  name: string;
+  slug: string;
+  description_fa: string | null;
+  permissions: string[];
+  is_system: boolean;
+  user_count: number;
+  permission_count: number;
+};
+
+export type AccessUser = {
+  id: number;
+  username: string;
+  full_name: string;
+  mobile: string | null;
+  group: number | null;
+  group_name: string | null;
+  is_active: boolean;
+  is_superuser: boolean;
+};
+
+export type BlogCategory = {
+  id: number;
+  name: string;
+  slug: string;
+  description_short: string | null;
+  parent: number | null;
+  is_active: boolean;
+  is_internal: boolean;
+  sort_order: number;
+  seo_title: string | null;
+  seo_description: string | null;
+  canonical_url: string | null;
+};
+
+export type BlogPostStatus = "DRAFT" | "PUBLISHED";
+
+export type BlogPost = {
+  id: number;
+  title: string;
+  slug: string;
+  category: number;
+  category_name: string;
+  excerpt: string | null;
+  content: string;
+  cover_image: number | null;
+  cover_image_url: string | null;
+  /** Read: editor images owned by the post; write: ids of images still in the content. */
+  content_images: { id: number; url: string }[];
+  author_name: string;
+  status: BlogPostStatus;
+  published_at: string | null;
+  is_internal_page: boolean;
+  seo_title: string | null;
+  seo_description: string | null;
+  canonical_url: string | null;
+  tags: number[];
+};
+
+export type BlogPostWrite = Omit<
+  BlogPost,
+  "id" | "category_name" | "cover_image_url" | "content_images" | "author_name" | "status" | "published_at" | "is_internal_page"
+> & { content_images: number[] };
+
+export type NotificationStatus = "NEW" | "READ" | "ARCHIVED";
+
+export type Notification = {
+  id: number;
+  user: number | null;
+  user_mobile: string | null;
+  type: "SYSTEM" | "ORDER" | "REVIEW" | "CONTACT" | "ACCOUNT";
+  title: string;
+  body: string;
+  status: NotificationStatus;
+  channel: "IN_APP" | "SMS" | "EMAIL";
+  related_object_type: string | null;
+  related_object_id: number | null;
+  created_at: string;
+  read_at: string | null;
+};
+
+export type ReviewStatus = "PENDING" | "APPROVED" | "REJECTED";
+
+export type ProductReview = {
+  id: number;
+  product: number;
+  product_name: string;
+  user_mobile: string;
+  order_number: string | null;
+  rating: number;
+  title: string | null;
+  body: string;
+  status: ReviewStatus;
+  moderated_at: string | null;
+  reject_reason: string | null;
+  created_at: string;
+};
+
+export type ContactMessageStatus = "NEW" | "READ" | "REPLIED";
+
+export type ContactMessage = {
+  id: number;
+  name: string;
+  mobile: string;
+  email: string | null;
+  subject: string;
+  message: string;
+  status: ContactMessageStatus;
+  note: string;
+  created_at: string;
+};
+
+export type SocialLinks = Partial<Record<"instagram" | "telegram" | "whatsapp" | "twitter" | "linkedin" | "youtube" | "aparat", string | null>>;
+
+export type TrustBadge = { image_id: number; link_url: string; image_url?: string | null };
+
+export type StoreSettings = {
+  store_name: string;
+  logo: number | null;
+  logo_url: string | null;
+  primary_color: string;
+  contact_phone: string;
+  contact_email: string;
+  address: string;
+  social_links: SocialLinks;
+  trust_badges: TrustBadge[];
+  default_profit_percentage: string;
+  reviews_enabled: boolean;
+  cod_enabled: boolean;
+  out_of_stock_display: "SHOW_WITH_BADGE" | "MOVE_TO_END";
+  sms_notifications_enabled: boolean;
+  footer_text: string;
+};
