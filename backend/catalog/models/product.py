@@ -1,8 +1,11 @@
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 import bleach
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Avg, Count, Exists, F, OuterRef, Q, QuerySet, Subquery, Sum
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 if TYPE_CHECKING:
@@ -17,6 +20,8 @@ ALLOWED_DESCRIPTION_ATTRIBUTES = {
     "img": ["src", "alt", "width", "height"],
 }
 ALLOWED_DESCRIPTION_PROTOCOLS = ["http", "https", "mailto"]
+# Sales that count for the «پرفروش» badge and the "popular" sort.
+BESTSELLER_WINDOW_DAYS = 30
 
 
 def sanitize_html(value: str) -> str:
@@ -60,6 +65,78 @@ class Product(models.Model):
     def __str__(self) -> str:
         return self.name
 
+    @classmethod
+    def storefront(cls) -> QuerySet:
+        """Products a visitor may see (published, not deleted, active category), annotated for listing and sorting.
+
+        ``rating_average``/``rating_count`` come from APPROVED reviews; ``sold_quantity`` from order lines of paid
+        orders in the last ``BESTSELLER_WINDOW_DAYS``; ``min_price`` is the cheapest retail price after the
+        variant discount; ``max_discount`` the largest active variant discount; ``in_stock`` whether any variant can
+        still be bought.
+        """
+        from catalog.models import ProductVariant
+        from commerce.models import Order, OrderItem
+
+        since = timezone.now() - timedelta(days=BESTSELLER_WINDOW_DAYS)
+        sold = (
+            OrderItem.objects.filter(
+                product=OuterRef("pk"), order__paid_at__gte=since,
+                order__payment_status__in=[Order.PaymentStatus.PAID, Order.PaymentStatus.PARTIALLY_REFUNDED],
+            )
+            .values("product")
+            .annotate(total=Sum("quantity"))
+            .values("total")
+        )
+        variants = ProductVariant.objects.filter(product=OuterRef("pk"))
+        effective_price = F("base_price") - Coalesce(
+            F("base_price") * F("discount_percentage") / 100, 0, output_field=models.DecimalField()
+        )
+        cheapest = (
+            variants.annotate(
+                effective=models.Case(
+                    models.When(is_discount_active=True, then=effective_price),
+                    default=F("base_price"),
+                    output_field=models.DecimalField(),
+                )
+            )
+            .order_by("effective")
+            .values("effective")[:1]
+        )
+        largest_discount = (
+            variants.filter(is_discount_active=True, discount_percentage__isnull=False)
+            .order_by("-discount_percentage")
+            .values("discount_percentage")[:1]
+        )
+        approved = Q(reviews__status="APPROVED")
+        return (
+            cls.objects.filter(is_published=True, deleted_at__isnull=True, category__is_active=True)
+            .annotate(
+                rating_average=Avg("reviews__rating", filter=approved),
+                rating_count=Count("reviews", filter=approved),
+                sold_quantity=Coalesce(Subquery(sold), 0, output_field=models.DecimalField()),
+                min_price=Subquery(cheapest),
+                max_discount=Subquery(largest_discount),
+                in_stock=Exists(variants.filter(stock_quantity__gte=F("reserved_quantity") + F("min_purchase"))),
+            )
+        )
+
+    @classmethod
+    def badge_rules(cls) -> tuple["datetime | None", set[int]]:
+        """(created-after moment for «جدید», ids of the «پرفروش» products) from the store settings; badges are
+        computed, never set by hand. A setting of 0 turns its badge off.
+        """
+        from commerce.models import StoreSettings
+
+        store = StoreSettings.get_solo()
+        new_since = timezone.now() - timedelta(days=store.new_product_days) if store.new_product_days else None
+        bestsellers = set()
+        if store.bestseller_count:
+            bestsellers = set(
+                cls.storefront().filter(sold_quantity__gt=0).order_by("-sold_quantity", "-id")
+                .values_list("pk", flat=True)[: store.bestseller_count]
+            )
+        return new_since, bestsellers
+
     def save(self, *args, **kwargs) -> None:
         self.description_long = sanitize_html(self.description_long)
         super().save(*args, **kwargs)
@@ -71,12 +148,12 @@ class Product(models.Model):
 
         errors = {}
         if brand is not None and not Brand.for_category(category.pk).filter(pk=brand.pk).exists():
-            errors["brand"] = f"Brand '{brand.name}' does not belong to category '{category.name}'."
+            errors["brand"] = f"برند «{brand.name}» متعلق به دسته‌بندی «{category.name}» نیست."
         tag_ids = {tag.pk for tag in tags}
         allowed = set(Tag.for_category(category.pk).filter(pk__in=tag_ids).values_list("pk", flat=True))
         invalid = [tag.name for tag in tags if tag.pk not in allowed]
         if invalid:
-            errors["tags"] = f"Tags {invalid} do not belong to category '{category.name}'."
+            errors["tags"] = f"برچسب‌های {invalid} متعلق به دسته‌بندی «{category.name}» نیستند."
         if errors:
             raise ValidationError(errors)
 

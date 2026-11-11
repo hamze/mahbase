@@ -82,6 +82,6 @@ class BlogPost(models.Model):
     def soft_delete(self) -> None:
         """Internal pages linked from the site menu (``SITE_MENU_INTERNAL_PAGES``) cannot be deleted."""
         if self.is_internal_page and self.slug in settings.SITE_MENU_INTERNAL_PAGES:
-            raise ValidationError("This internal page is linked from the site menu and cannot be deleted.")
+            raise ValidationError("این صفحه داخلی در منوی سایت استفاده شده و قابل حذف نیست.")
         self.deleted_at = timezone.now()
         self.save(update_fields=["deleted_at", "updated_at"])

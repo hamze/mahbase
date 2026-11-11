@@ -24,7 +24,7 @@ class AttributeOption(models.Model):
             return
         stored = AttributeOption.objects.get(pk=self.pk)
         if stored.value != self.value and stored.is_referenced():
-            raise ValidationError({"value": "This option is used by products and cannot be renamed."})
+            raise ValidationError({"value": "این گزینه در محصولات استفاده شده و قابل تغییر نام نیست."})
 
     def is_referenced(self) -> bool:
         return (

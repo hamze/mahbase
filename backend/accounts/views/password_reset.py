@@ -7,21 +7,26 @@ from rest_framework.views import APIView
 
 from accounts.models import OTPCode
 from accounts.serializers import MobileSerializer, PasswordResetConfirmSerializer
-from accounts.services.sms.provider import get_sms_sender
+from accounts.services.otp_delivery import SmsDeliveryFailed, send_code
+from accounts.throttles import OTPIPThrottle
+from config.api import Responses
 
 
 class PasswordResetRequestView(APIView):
     """``POST /api/auth/password/reset/request/`` — same response whether or not the account exists."""
 
     permission_classes = [AllowAny]
+    throttle_classes = [OTPIPThrottle]
 
     def post(self, request: Request) -> Response:
         serializer = MobileSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         mobile = serializer.validated_data["mobile"]
         if User.objects.filter(username=mobile, is_active=True).exists():
-            code = OTPCode.issue(mobile, OTPCode.Purpose.RESET_PASSWORD)
-            get_sms_sender().send(mobile, f"Password reset code: {code}")
+            try:
+                send_code(mobile, OTPCode.Purpose.RESET_PASSWORD)
+            except SmsDeliveryFailed:
+                return Responses.get_response(Responses.ACCOUNT_GENERAL.SMS_SEND_FAILED)
         return Response(status=status.HTTP_202_ACCEPTED)
 
 
@@ -35,8 +40,8 @@ class PasswordResetConfirmView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         if not OTPCode.verify(data["mobile"], OTPCode.Purpose.RESET_PASSWORD, data["code"]):
-            return Response({"code": ["Invalid or expired code."]}, status=status.HTTP_400_BAD_REQUEST)
+            return Responses.get_response(Responses.ACCOUNT_GENERAL.INVALID_OTP)
         user = User.objects.get(username=data["mobile"])
         user.set_password(data["new_password"])
         user.save(update_fields=["password"])
-        return Response({"detail": "Password changed."})
+        return Responses.get_response(Responses.ACCOUNT_GENERAL.PASSWORD_CHANGED)

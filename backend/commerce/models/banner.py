@@ -6,7 +6,10 @@ from django.db.models import F, Q
 
 
 class Banner(models.Model):
-    """Image banner for a site position, optionally limited to a time window (both ends inclusive)."""
+    """Image banner for a site position, optionally limited to a time window (both ends inclusive).
+
+    The whole banner is the link (``link_url``); there is no separate button.
+    """
 
     class Position(models.TextChoices):
         TOP_HEADER = "TOP_HEADER"
@@ -14,6 +17,7 @@ class Banner(models.Model):
         SIDEBAR = "SIDEBAR"
 
     title = models.CharField(max_length=200)
+    subtitle = models.CharField(max_length=300, blank=True)
     image = models.ForeignKey("catalog.MediaAsset", on_delete=models.PROTECT, related_name="+")
     link_url = models.CharField(max_length=500, null=True, blank=True)
     position = models.CharField(max_length=15, choices=Position.choices)
@@ -36,7 +40,7 @@ class Banner(models.Model):
 
     def clean(self) -> None:
         if self.start_at and self.end_at and self.end_at <= self.start_at:
-            raise ValidationError({"end_at": "The end must be after the start."})
+            raise ValidationError({"end_at": "زمان پایان باید بعد از زمان شروع باشد."})
 
     @classmethod
     def visible_at(cls, moment: datetime) -> models.QuerySet:

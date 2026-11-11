@@ -53,7 +53,9 @@ class MyNotificationViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     serializer_class = NotificationSerializer
 
     def get_queryset(self) -> QuerySet:
-        return Notification.objects.filter(user=self.request.user).exclude(status=Notification.Status.ARCHIVED)
+        return Notification.objects.filter(user=self.request.user, channel=Notification.Channel.IN_APP).exclude(
+            status=Notification.Status.ARCHIVED
+        )
 
     @action(detail=True, methods=["patch"])
     def read(self, request: Request, pk: str) -> Response:

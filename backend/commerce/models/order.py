@@ -1,6 +1,6 @@
 import secrets
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import TYPE_CHECKING
 
 from django.conf import settings
@@ -9,12 +9,21 @@ from django.db import models, transaction
 from django.db.models import F, Q
 from django.utils import timezone
 
+from accounts.services.sms.templates import SmsTemplate
 from catalog.models.product_variant import PRICE
 
 if TYPE_CHECKING:
     from commerce.models import OrderRefund
 
 ZERO = Decimal("0")
+
+
+# Order status → (notification title, SMS template). Reaching IN_PREPARATION means the payment was accepted.
+STATUS_NOTIFICATIONS = {
+    "IN_PREPARATION": ("پرداخت سفارش شما تأیید شد", SmsTemplate.ORDER_PAID),
+    "SHIPPED": ("سفارش شما ارسال شد", SmsTemplate.ORDER_SHIPPED),
+    "DELIVERED": ("سفارش شما تحویل شد", SmsTemplate.ORDER_DELIVERED),
+}
 
 
 class InvalidTransition(Exception):
@@ -93,6 +102,10 @@ class Order(models.Model):
     shipping_cost = models.DecimalField(**PRICE, default=ZERO)
     shipping_discount_amount = models.DecimalField(**PRICE, default=ZERO)
     other_costs = models.DecimalField(**PRICE, default=ZERO)
+    # Snapshots of StoreSettings.packaging_fee and the tax computed at confirmation.
+    packaging_fee = models.DecimalField(**PRICE, default=ZERO)
+    tax_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=ZERO)
+    tax_amount = models.DecimalField(**PRICE, default=ZERO)
     payable_total = models.DecimalField(**PRICE, default=ZERO)
     paid_total = models.DecimalField(**PRICE, default=ZERO)
     refunded_total = models.DecimalField(**PRICE, default=ZERO)
@@ -128,6 +141,20 @@ class Order(models.Model):
 
     def __str__(self) -> str:
         return self.order_number
+
+    def set_totals(self, packaging_fee: Decimal, tax_percentage: Decimal) -> None:
+        """``payable_total`` from the already set product, discount and shipping amounts.
+
+        Tax applies to products after discounts plus packaging and shipping after its discount.
+        """
+        taxable = (
+            self.subtotal_products - self.discount_amount + self.shipping_cost - self.shipping_discount_amount
+            + packaging_fee + self.other_costs
+        )
+        self.packaging_fee = packaging_fee
+        self.tax_percentage = tax_percentage
+        self.tax_amount = (taxable * tax_percentage / 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        self.payable_total = taxable + self.tax_amount
 
     @staticmethod
     def new_order_number() -> str:
@@ -171,8 +198,19 @@ class Order(models.Model):
         """Validate and set ``order_status`` (caller saves); raises ``InvalidTransition``."""
         allowed = (self.MANUAL_TRANSITIONS if manual else self.TRANSITIONS).get(self.order_status, set())
         if new_status not in allowed:
-            raise InvalidTransition(f"Order status cannot change from {self.order_status} to {new_status}.")
+            raise InvalidTransition(f"وضعیت سفارش از {self.order_status} به {new_status} قابل تغییر نیست.")
         self.order_status = new_status
+        if new_status in STATUS_NOTIFICATIONS:
+            self.notify(*STATUS_NOTIFICATIONS[new_status])
+
+    def notify(self, title: str, template: str) -> None:
+        """In-app notification to the customer (plus SMS when enabled) about this order."""
+        from commerce.models import Notification
+
+        Notification.notify(
+            self.user, Notification.Type.ORDER, title, f"سفارش {self.order_number}",
+            related=("order", self.pk), sms=(template, [self.order_number]),
+        )
 
     def cancel(self, reason: str) -> None:
         """Move to CANCELLED (caller saves)."""
@@ -194,7 +232,7 @@ class Order(models.Model):
         from catalog.models import ProductVariant
 
         if self.stock_reservation_status != self.ReservationStatus.RESERVED:
-            raise InvalidTransition(f"Reservation is already {self.stock_reservation_status}.")
+            raise InvalidTransition(f"وضعیت رزرو موجودی هم‌اکنون {self.stock_reservation_status} است.")
         quantities = {}
         for item in self.items.exclude(variant=None):
             quantities[item.variant_id] = quantities.get(item.variant_id, ZERO) + item.quantity
@@ -267,12 +305,12 @@ class Order(models.Model):
         if self.payment_status not in (self.PaymentStatus.PAID, self.PaymentStatus.PARTIALLY_REFUNDED) or (
             self.order_status not in (self.Status.IN_PREPARATION, self.Status.READY_TO_SHIP)
         ):
-            raise InvalidTransition("Only paid orders that have not shipped can be cancelled with a refund.")
+            raise InvalidTransition("فقط سفارش‌های پرداخت‌شده‌ای که ارسال نشده‌اند با بازگشت وجه لغو می‌شوند.")
         if self.refunds.exclude(status__in=(OrderRefund.Status.COMPLETED, OrderRefund.Status.REJECTED)).exists():
             raise InvalidTransition("This order has an open refund; finish or reject it before cancelling.")
         amount = self.refundable_amount()
         if amount <= 0:
-            raise InvalidTransition("Nothing is left to refund on this order.")
+            raise InvalidTransition("مبلغی برای بازگشت وجه در این سفارش باقی نمانده است.")
         refund = OrderRefund.objects.create(
             order=self,
             amount=amount,

@@ -1,9 +1,9 @@
 from typing import TYPE_CHECKING
 
-from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import BasePermission
 
 from commerce.models import StoreSettings
+from config.api import ResponseError, Responses
 
 if TYPE_CHECKING:
     from rest_framework.request import Request
@@ -18,5 +18,5 @@ class ReviewsEnabled(BasePermission):
 
     def has_permission(self, request: "Request", view: "APIView") -> bool:
         if not StoreSettings.get_solo().reviews_enabled:
-            raise PermissionDenied("Product reviews are disabled.")
+            raise ResponseError(Responses.CATALOG.REVIEWS_DISABLED)
         return True

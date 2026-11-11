@@ -32,6 +32,19 @@ class PublicBlogPostViewSet(viewsets.ReadOnlyModelViewSet):
         return posts.order_by("-published_at", "-id")
 
 
+class InternalPageListView(generics.ListAPIView):
+    """``GET /api/blog/internal-pages/`` — ``[{title, slug}]`` of every published internal page, for the site menu
+    and footer (public).
+    """
+
+    permission_classes = [AllowAny]
+    pagination_class = None
+
+    def list(self, request: Request) -> Response:
+        pages = BlogPost.internal_pages().order_by("title").values("title", "slug")
+        return Response(list(pages))
+
+
 class InternalPageView(generics.RetrieveAPIView):
     """``GET /api/blog/internal-pages/{slug}/`` — a published post of the internal category (site menu pages)."""
 

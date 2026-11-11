@@ -3,6 +3,8 @@ import logging
 from celery import shared_task
 from django.utils import timezone
 
+from accounts.services.sms.provider import get_sms_sender
+from accounts.services.sms.templates import SmsTemplate
 from commerce.models import Order
 from commerce.services.refunds import process_refund
 
@@ -19,6 +21,15 @@ def release_expired_reservations() -> int:
     if released:
         logger.info(f"Released {released} expired order reservations")
     return released
+
+
+@shared_task
+def send_sms_task(mobile: str, template: str, tokens: list[str]) -> None:
+    """Notification SMS (``Notification.notify``); a failure is logged and not retried."""
+    try:
+        get_sms_sender().send_template(mobile, SmsTemplate(template), tokens)
+    except Exception as e:
+        logger.error(f"Notification SMS {template} failed: {str(e)}", exc_info=True)
 
 
 @shared_task

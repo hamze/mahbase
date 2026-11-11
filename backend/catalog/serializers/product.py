@@ -73,7 +73,7 @@ class ProductWriteSerializer(serializers.ModelSerializer):
         if product is None:
             attrs["variants"] = self._validate_new_variants(category, attrs.get("variants", []))
         elif "variants" in attrs:
-            raise serializers.ValidationError({"variants": "Use the variant endpoints to change variants."})
+            raise serializers.ValidationError({"variants": "برای تغییر تنوع‌ها از بخش تنوع‌ها استفاده کنید."})
         return attrs
 
     def _require_active(self, attrs: dict, product: Product | None) -> None:
@@ -82,17 +82,17 @@ class ProductWriteSerializer(serializers.ModelSerializer):
         for name in ("category", "brand", "unit"):
             value = attrs.get(name)
             if value is not None and not value.is_active and (product is None or getattr(product, f"{name}_id") != value.pk):
-                errors[name] = f"'{value}' is inactive."
+                errors[name] = f"«{value}» غیرفعال است."
         current_tags = set(product.tags.values_list("pk", flat=True)) if product else set()
         inactive_tags = [str(tag) for tag in attrs.get("tags", []) if not tag.is_active and tag.pk not in current_tags]
         if inactive_tags:
-            errors["tags"] = f"Tags {inactive_tags} are inactive."
+            errors["tags"] = f"برچسب‌های {inactive_tags} غیرفعال هستند."
         if errors:
             raise serializers.ValidationError(errors)
 
     def _validate_new_variants(self, category: Category, variants: list[dict]) -> list[dict]:
         if not variants:
-            raise serializers.ValidationError({"variants": "A product needs at least one variant."})
+            raise serializers.ValidationError({"variants": "محصول باید حداقل یک تنوع داشته باشد."})
         hashes = set()
         for variant in variants:
             variant["attributes"] = Attribute.validate_values(
@@ -100,7 +100,7 @@ class ProductWriteSerializer(serializers.ModelSerializer):
             )
             combination_hash = ProductVariant.compute_combination_hash(variant["attributes"])
             if combination_hash in hashes:
-                raise serializers.ValidationError({"variants": "Two variants have the same attribute combination."})
+                raise serializers.ValidationError({"variants": "دو تنوع ترکیب ویژگی یکسانی دارند."})
             hashes.add(combination_hash)
         return variants
 

@@ -1,7 +1,8 @@
-# Mahbase — catalog & product admin
+# Mahbase — online store
 
-Single-store catalog: Django + Django REST Framework + Simple JWT on PostgreSQL (`backend/`) and a Persian RTL
-Next.js admin panel (`frontend/`). Django is the authority for validation, data integrity and permissions; the
+Single-store shop: Django + Django REST Framework + Simple JWT on PostgreSQL (`backend/`), a Persian RTL
+Next.js admin panel (`admin-panel/`), a Persian RTL customer storefront (`frontend/`, Next.js, server-rendered) and a mock bank
+gateway for development (`payment-mock/`). Django is the authority for validation, data integrity and permissions; the
 Next.js app only renders, and hides controls the user cannot use.
 
 ## Layout
@@ -11,8 +12,10 @@ Next.js app only renders, and hides controls the user cannot use.
 | `backend/config/` | Django settings (env driven, console logging), URLs |
 | `backend/catalog/` | Models (`models/`), serializers, views, RBAC permission, Django Admin, media cleanup |
 | `backend/accounts/` | JWT endpoints and `GET /api/auth/me/` |
-| `frontend/` | Next.js 15 admin (App Router) |
-| `nginx/` | Reverse proxy serving Django static/media in the Compose stack |
+| `admin-panel/` | Next.js admin panel (App Router) |
+| `frontend/` | Customer storefront and user panel (Next.js App Router; public pages server-rendered for SEO, all data from the backend API) |
+| `payment-mock/` | Mock Iranian bank gateway (request → pay page with success/fail → return → verify), stdlib Python |
+| `nginx/` | Reverse proxy in the Compose stacks: Django (API, Admin, static/media), storefront, admin panel |
 
 ## Configuration
 
@@ -34,10 +37,27 @@ docker compose exec backend python manage.py createsuperuser
 | `backend` | `mahbase-backend` | `8000` | Django/gunicorn (runs migrations and collectstatic on start) |
 | `worker` | `mahbase-worker` | — | Celery worker (gateway refunds, reservation expiry) |
 | `beat` | `mahbase-beat` | — | Celery beat: `release_expired_reservations` every `RESERVATION_EXPIRY_INTERVAL_SECONDS` |
-| `proxy` | `mahbase-proxy` | `8080` | nginx: `/static/`, `/media/`, proxies API and `/admin/` |
-| `frontend` | `mahbase-frontend` | `3000` | Next.js admin — open http://localhost:3000/manage |
+| `proxy` | `mahbase-proxy` | `8080`, `8081`, `3000` | nginx: `8080` Django (API, `/admin/`, `/static/`, `/media/`); `8081` storefront; `3000` admin panel |
+| `admin-panel` | `mahbase-admin-panel` | `3001` | Next.js admin, served via `proxy` — open http://localhost:3000/manage (`3001` = direct, debugging) |
+| `frontend` | `mahbase-frontend` | `3002` | Storefront (Next.js server; `/api/` forwarded to `proxy`), served via `proxy` — http://localhost:8081 (`3002` = direct, debugging) |
+| `payment-mock` | `mahbase-payment-mock` | `8090` | Mock bank: merchant API for the backend, pay page for customers |
 
-Django Admin: http://localhost:8080/admin/. All services share the `mahbase` network.
+Django Admin: http://localhost:8080/admin/. All services share the `mahbase` network. The storefront and the admin
+panel both use `/_next/`, `/api/` and `/media/`, so nginx gives each its own server (port locally, domain on the server)
+instead of a path prefix.
+
+## Running on the server (Traefik)
+
+`docker-compose.server.yml` runs the same services without host ports, joined to an existing Traefik on the external
+`traefik-proxy` network. Traefik routes `SITE_DOMAIN` to the storefront, `ADMIN_DOMAIN` to the admin panel (and
+`ADMIN_DOMAIN/admin/` to Django Admin) — all through nginx — and `PAYMENT_MOCK_DOMAIN` to the mock bank's pay page.
+In `.env` set `SITE_DOMAIN`, `ADMIN_DOMAIN`, `PAYMENT_MOCK_DOMAIN`, `TRAEFIK_ENTRYPOINT` (default `web`), add the domains
+to `DJANGO_ALLOWED_HOSTS` (keep `proxy`), and point `STOREFRONT_URL` / `PAYMENT_MOCK_PUBLIC_URL` at the public URLs.
+
+```bash
+docker compose -f docker-compose.server.yml up --build -d
+docker compose -f docker-compose.server.yml exec backend python manage.py createsuperuser
+```
 
 The auth cookies are `Secure` by default. Browsers accept secure cookies on `http://localhost`, but on any other plain
 HTTP host set `COOKIE_SECURE=false` for testing only; production must run behind HTTPS.
@@ -55,10 +75,19 @@ export DJANGO_SECRET_KEY=dev DJANGO_DEBUG=true POSTGRES_PASSWORD=<from .env> POS
 .venv/bin/python manage.py runserver                      # http://localhost:8000 (also serves /media, see DJANGO_SERVE_MEDIA)
 .venv/bin/celery -A config worker --beat --loglevel=INFO  # second terminal: expiry schedule + refunds
 
-cd ../frontend
+cd ../admin-panel
 npm install
 BACKEND_URL=http://localhost:8000 npm run dev             # http://localhost:3000/manage
+
+cd ../payment-mock && python3 app.py                       # mock bank on http://localhost:8090
+
+cd ../frontend
+npm install
+npm run dev                                               # http://localhost:5173, forwards /api and /media to :8000
 ```
+
+For local development set `STOREFRONT_URL=http://localhost:5173` for the backend so the bank returns customers to the
+storefront dev server.
 
 Checks: `python manage.py test accounts blog catalog commerce` (needs PostgreSQL; the tests use row locks), `npm run lint`,
 `npm run build`.
@@ -147,7 +176,16 @@ Endpoints follow the catalog specification (section 7). Behaviour worth knowing:
   main category also applies to all its subcategories (a subcategory link applies to that subcategory only). The rule lives on `Brand.for_category` / `Tag.for_category`.
 - **Category change** on a product re-validates brand, tags, descriptive attribute values and existing variant
   attributes against the new category.
-- Validation errors are `400` with DRF's field → messages shape; a concurrent constraint conflict is `409`.
+- **Response shape.** Every JSON body is `{"state", "message", "data"}`, built from the constants in
+  `backend/config/api/responses.py` (`Responses`). Success: `state: "success"` and the result in `data` (wrapped by
+  `config.api.renderers.EnvelopeJSONRenderer`, so views return plain data). Errors come from
+  `config.api.exceptions.exception_handler` or `Responses.get_response(Responses.<GROUP>.<TYPE>, data)` in a view:
+  `state` is the error code (`wrong_inputs`, `not_found`, `unauthorized`, `forbidden`, `invalid_state`, `conflict`,
+  `invalid_otp`, `order_items_rejected`, …), `message` is Persian, and `data` holds details (validation
+  `{field: [messages]}`, checkout `{lines: …}`, the stock warning). Raise `ResponseError(Responses.X.Y)` where a
+  view cannot return. Add new error types to `Responses`, never ad-hoc `{"detail": …}` bodies. HTTP statuses stay
+  meaningful (400/401/403/404/409/422/429/502); field-level validation texts are Persian, written where the rule
+  lives (model/serializer).
 - Prices (`base_price`, `wholesale_price`) and all order money are `Decimal(18, 2)` Toman; orders copy catalog
   decimals as they are.
 - **Stock vs. reservations**: `reserved_quantity` is held by unpaid orders; `available = stock_quantity −
@@ -160,8 +198,24 @@ Endpoints follow the catalog specification (section 7). Behaviour worth knowing:
 - **Customer login**: `POST /api/auth/otp/request/ {mobile}` → `POST /api/auth/otp/verify/ {mobile, code}` returns
   JWTs; the first verify creates the customer (`username` = `09xxxxxxxxx`, unusable password). Only the newest code
   counts; it expires after `OTP_TTL_SECONDS` and allows `OTP_MAX_ATTEMPTS` tries. Admin password reset:
-  `POST /api/auth/password/reset/request/` and `…/confirm/ {mobile, code, new_password}`. SMS goes through
-  `SMS_SENDER` (`accounts/services/sms`); the console sender is for development only.
+  `POST /api/auth/password/reset/request/` and `…/confirm/ {mobile, code, new_password}`. One code per mobile and
+  purpose every `OTP_RESEND_SECONDS` (2 minutes) plus `OTP_RATE_IP` requests per IP. Customer sessions slide: the
+  refresh token rotates on use and expires after `JWT_REFRESH_DAYS` (90) without a visit; staff refresh tokens last
+  `JWT_STAFF_REFRESH_DAYS` (1).
+- **Mobile change**: `POST /api/auth/mobile/change/request/ {new_mobile}` texts a code to the current number and one
+  to the new number; `POST …/confirm/ {new_mobile, old_code, new_code}` changes the login only when both are valid.
+- **SMS**: every message is a provider pattern (template) with ordered tokens. `SMS_SENDER` selects the panel
+  (`accounts.services.sms.console.ConsoleSmsSender` for development, `…kavenegar.KavenegarSmsSender` with
+  `KAVENEGAR_API_KEY`); template names live in one place, `backend/accounts/services/sms/templates.py`, mapped per
+  panel — create those patterns in the Kavenegar panel. Order notifications (paid, shipped, delivered, refunded) are
+  always created in-app; an SMS copy is sent by the worker when `sms_notifications_enabled` is on in store settings.
+- **Storefront catalog** (public): `GET /api/shop/categories/` (active tree), `/api/shop/categories/{slug}/filters/`
+  (brands and filterable attribute values), `/api/shop/products/` (filters `search, category, brand, tag, min_price,
+  max_price, in_stock, attr_<id>`; `sort` newest | cheapest | expensive | discount | popular | rating),
+  `/api/shop/products/{slug}/` and `…/related/`. Variants show only the caller's tier price, discount and
+  `is_available` (no stock counts or other tiers' prices). Ratings are the average and count of approved reviews.
+  Badges «جدید» (created within `new_product_days`) and «پرفروش» (top `bestseller_count` by 30-day sales) are
+  computed from store settings, never set by hand. `GET /api/blog/internal-pages/` lists internal pages for menus.
 - **Cart**: guests keep `{variant_id: quantity}` in the Django session only; at login (`user_logged_in`) it is merged
   into the database cart (capped by max purchase and availability, rounded to the purchase step). Items are addressed
   by variant id: `POST /api/cart/items/`, `PATCH|DELETE /api/cart/items/{variant_id}/`. `GET /api/cart/` returns
@@ -171,7 +225,10 @@ Endpoints follow the catalog specification (section 7). Behaviour worth knowing:
   catalog and the customer tier, snapshots lines and address, applies the discount code, reserves stock for
   `ORDER_RESERVATION_MINUTES` and clears the cart in one transaction. A failing line returns `422` with per-line
   errors and nothing changes. Response: `{order_number, payment_redirect_url, order}`; a repeated key returns the
-  same order (`200`).
+  same order (`200`). `payment_redirect_url` is a fresh bank link (null when the bank is unreachable; retry with
+  `POST /api/me/orders/{n}/pay/`). Totals add the store's `packaging_fee` and `tax_percentage` (on products after
+  discounts + packaging + shipping); `POST /api/orders/quote/ {shipping_method?, discount_code?}` returns the same
+  totals for the checkout summary. Customers cannot cancel orders; cancelling is admin-only.
 - **Admin order for a customer** `POST /api/admin/orders/` (`admin.orders.create`, header `Idempotency-Key` of at
   most 58 characters) takes `customer` (id) **or** `new_customer {mobile, first_name?, last_name?, customer_tier?}`,
   `address` (one of that customer's addresses) **or** `new_address {…}` (required for a new customer),
@@ -180,15 +237,19 @@ Endpoints follow the catalog specification (section 7). Behaviour worth knowing:
   customer (`created_source=ADMIN_CREATED`), the new address and the order are created in one transaction, so a
   `422` (per-line errors keyed by variant id) or `400` leaves nothing behind. The key is stored as `admin-<key>` and
   looked up across customers, so a retry returns the same order (`200`) even when it created the customer. The
-  response matches customer checkout (`{order_number, payment_redirect_url, order}`) — the admin sends the payment
-  link to the customer; the order expires like any other. Each order is recorded in the audit log
+  response matches customer checkout (`{order_number, payment_redirect_url, order}`) — `payment_redirect_url` is the
+  order's storefront page (`STOREFRONT_URL/account/orders/{n}`), where the customer pays; the order expires like any other. Each order is recorded in the audit log
   (`order.created_by_admin`). Form lookups (same permission): `GET /api/admin/orders/customers/?search=` (active
   customers by mobile/name, 20 max), `GET /api/admin/orders/customers/{id}/addresses/`,
   `GET /api/admin/orders/variants/?search=&customer_tier=` (sellable variants by SKU/product name with the tier
   price, availability and purchase limits, 20 max).
-- **Payment callback** `POST /api/payments/callback/` (signed by the gateway; the sandbox gateway expects an
-  HMAC-SHA256 of the body with `PAYMENT_GATEWAY_SECRET` in `X-Gateway-Signature`) locks the order, then variants.
-  It is idempotent per `idempotency_key`; a gateway transaction id already used by another order returns `409`.
+- **Payment (Iranian bank flow)**: the backend requests a payment from the gateway (`PAYMENT_GATEWAY`, interface in
+  `commerce/services/payment_gateway/`; only the mock bank for now) and stores the bank's `authority` in a
+  `PaymentAttempt`; the customer is sent to the bank, which returns them to `GET /api/payments/return/?authority=
+  &status=OK|NOK&order_id=&ref_id=`. A reported success is **verified with the bank server-side** before it is
+  applied; the customer is then redirected to `STOREFRONT_URL/checkout/result?order=&status=success|failed|error&
+  result=&ref=`. Applying a result locks the order, then variants, and is idempotent per attempt; a bank reference
+  already used by another order is rejected.
   RESERVED → stock is deducted and the order moves to preparation (late payments are accepted while the stock is
   held). RELEASED → the payment is recorded and refunded. `stock_invalidated` → recorded as `SUCCESS_BUT_REJECTED`,
   the order is cancelled, its reservation released and the payment refunded. Refunds are sent to the gateway by the

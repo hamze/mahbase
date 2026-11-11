@@ -8,6 +8,7 @@ router.register("categories", views.PublicBlogCategoryViewSet, basename="blog-ca
 router.register("posts", views.PublicBlogPostViewSet, basename="blog-post")
 
 urlpatterns = [
+    path("internal-pages/", views.InternalPageListView.as_view(), name="blog-internal-pages"),
     path("internal-pages/<slug:slug>/", views.InternalPageView.as_view(), name="blog-internal-page"),
     *router.urls,
 ]

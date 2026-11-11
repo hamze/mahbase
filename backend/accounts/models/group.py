@@ -21,7 +21,7 @@ class Group(models.Model):
 
     def delete(self, *args, **kwargs) -> tuple[int, dict[str, int]]:
         if self.is_system:
-            raise ValidationError("System groups cannot be deleted.")
+            raise ValidationError("گروه‌های سیستمی قابل حذف نیستند.")
         return super().delete(*args, **kwargs)
 
     def replace_permissions(self, permissions: list) -> None:

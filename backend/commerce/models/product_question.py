@@ -60,7 +60,7 @@ class ProductQuestion(models.Model):
 
     def reject(self) -> None:
         if self.status == self.Status.ANSWERED:
-            raise InvalidTransition("An answered question cannot be rejected; unpublish it instead.")
+            raise InvalidTransition("پرسش پاسخ‌داده‌شده قابل رد نیست؛ به جای آن انتشارش را لغو کنید.")
         self.status = self.Status.REJECTED
         self.is_public = False
         self.save(update_fields=["status", "is_public"])

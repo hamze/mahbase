@@ -16,7 +16,7 @@ from catalog.tests.helpers import make_staff
 from commerce.models import AuditLog, DiscountCode, InvalidTransition, Order, OrderRefund, ReturnRequest, ShippingMethod
 from commerce.services.checkout import place_admin_order, request_fingerprint
 from commerce.services.refunds import process_refund
-from commerce.tests.helpers import GATEWAY_SECRET, ShopFixture, post_callback
+from commerce.tests.helpers import FAKE_GATEWAY, ShopFixture, post_callback
 
 refund_inline = mock.patch("commerce.tasks.process_refund_task.delay", side_effect=process_refund)
 
@@ -37,7 +37,7 @@ def callback(order: Order, txn: str, amount: Decimal | None = None) -> dict:
     }
 
 
-@override_settings(PAYMENT_GATEWAY_SECRET=GATEWAY_SECRET)
+@override_settings(PAYMENT_GATEWAY=FAKE_GATEWAY)
 class ConcurrencyTests(TransactionTestCase):
     def test_concurrent_checkouts_never_reserve_more_than_available(self) -> None:
         shop = ShopFixture()  # stock 5; each customer wants 2
@@ -77,7 +77,7 @@ class ConcurrencyTests(TransactionTestCase):
 
         def pay() -> None:
             try:
-                responses.append(post_callback(APIClient(), callback(order, "T-1")).status_code)
+                responses.append(post_callback(callback(order, "T-1")).status_code)
             finally:
                 connection.close()
 
@@ -100,7 +100,7 @@ class ConcurrencyTests(TransactionTestCase):
             self.assertEqual((refund.reason, refund.status), ("PAYMENT_AFTER_RELEASE", "COMPLETED"))
 
 
-@override_settings(PAYMENT_GATEWAY_SECRET=GATEWAY_SECRET)
+@override_settings(PAYMENT_GATEWAY=FAKE_GATEWAY)
 class CheckoutAndPaymentTests(TestCase):
     def setUp(self) -> None:
         self.shop = ShopFixture()
@@ -115,7 +115,7 @@ class CheckoutAndPaymentTests(TestCase):
         response = checkout(self.user, self.shop.order_payload(self.address, discount_code="off10"))
 
         self.assertEqual(response.status_code, 422, response.data)
-        self.assertIn(str(other.pk), response.data["lines"])
+        self.assertIn(str(other.pk), response.data["data"]["lines"])
         self.assertFalse(Order.objects.exists())
         self.assertEqual(cart.items.count(), 2)
         code.refresh_from_db()
@@ -133,15 +133,15 @@ class CheckoutAndPaymentTests(TestCase):
 
         warning = admin.patch(url, {"stock_quantity": "1"}, format="json")
         self.assertEqual(warning.status_code, 409)
-        self.assertEqual(warning.data["shortfall"], Decimal("1"))
-        self.assertEqual(warning.data["affected_orders"], [{"order_number": order.order_number, "quantity": Decimal("2")}])
+        self.assertEqual(warning.data["data"]["shortfall"], Decimal("1"))
+        self.assertEqual(warning.data["data"]["affected_orders"], [{"order_number": order.order_number, "quantity": Decimal("2")}])
         self.assertEqual(admin.patch(url, {"stock_quantity": "1", "confirm": True}, format="json").status_code, 200)
         order.refresh_from_db()
         self.assertTrue(order.stock_invalidated)
         self.assertTrue(AuditLog.objects.filter(action="variant.stock_below_reserved_confirmed").exists())
 
         with self.captureOnCommitCallbacks(execute=True):
-            response = post_callback(self.client, callback(order, "T-1"))
+            response = post_callback(callback(order, "T-1"))
 
         self.assertEqual((response.status_code, response.json()["result"]), (200, "SUCCESS_BUT_REJECTED"))
         order.refresh_from_db()
@@ -161,7 +161,7 @@ class CheckoutAndPaymentTests(TestCase):
         captured = order.payable_total + Decimal("50")
 
         with self.captureOnCommitCallbacks(execute=True):
-            response = post_callback(self.client, callback(order, "T-1", captured))
+            response = post_callback(callback(order, "T-1", captured))
 
         self.assertEqual((response.status_code, response.json()["result"]), (200, "SUCCESS_BUT_REJECTED"))
         order.refresh_from_db()
@@ -180,9 +180,9 @@ class CheckoutAndPaymentTests(TestCase):
         other_user, other_address = self.shop.customer("09120000002")
         second = Order.objects.get(order_number=checkout(other_user, self.shop.order_payload(other_address)).data["order_number"])
 
-        self.assertEqual(post_callback(self.client, callback(first, "T-1")).status_code, 200)
-        self.assertEqual(post_callback(self.client, callback(first, "T-1")).status_code, 200)  # idempotent retry
-        duplicate = post_callback(self.client, {**callback(second, "T-1"), "idempotency_key": "cb-other"})
+        self.assertEqual(post_callback(callback(first, "T-1")).status_code, 200)
+        self.assertEqual(post_callback(callback(first, "T-1")).status_code, 200)  # idempotent retry
+        duplicate = post_callback({**callback(second, "T-1"), "idempotency_key": "cb-other"})
 
         self.assertEqual(duplicate.status_code, 409)
         second.refresh_from_db()
@@ -208,7 +208,7 @@ class CheckoutAndPaymentTests(TestCase):
         self.assertTrue(Order.expire_reservation(order.pk))
 
         with self.captureOnCommitCallbacks(execute=True):
-            response = post_callback(self.client, callback(order, "T-1"))
+            response = post_callback(callback(order, "T-1"))
 
         self.assertEqual(response.json()["result"], "REJECTED_AFTER_RELEASE")
         order.refresh_from_db()
@@ -233,7 +233,7 @@ class CheckoutAndPaymentTests(TestCase):
 
     def test_return_refund_is_capped_by_open_refunds(self) -> None:
         order = Order.objects.get(order_number=checkout(self.user, self.shop.order_payload(self.address)).data["order_number"])
-        post_callback(self.client, callback(order, "T-1"))
+        post_callback(callback(order, "T-1"))
         Order.objects.filter(pk=order.pk).update(order_status=Order.Status.DELIVERED)
         order.refresh_from_db()
         admin = make_staff("admin")
@@ -256,8 +256,8 @@ class CheckoutAndPaymentTests(TestCase):
         self.assertTrue(Order.expire_reservation(order.pk))
 
         with self.captureOnCommitCallbacks(execute=True):
-            post_callback(self.client, callback(order, "T-1"))
-            second = post_callback(self.client, callback(order, "T-2"))
+            post_callback(callback(order, "T-1"))
+            second = post_callback(callback(order, "T-2"))
 
         self.assertEqual((second.status_code, second.json()["result"]), (200, "DUPLICATE_REJECTED"))
         order.refresh_from_db()
@@ -268,9 +268,9 @@ class CheckoutAndPaymentTests(TestCase):
         first = Order.objects.get(order_number=checkout(self.user, self.shop.order_payload(self.address)).data["order_number"])
         other_user, other_address = self.shop.customer("09120000002")
         second = Order.objects.get(order_number=checkout(other_user, self.shop.order_payload(other_address)).data["order_number"])
-        post_callback(self.client, callback(first, "T-1"))
+        post_callback(callback(first, "T-1"))
 
-        response = post_callback(self.client, {**callback(second, "T-2"), "idempotency_key": "cb-T-1"})
+        response = post_callback({**callback(second, "T-2"), "idempotency_key": "cb-T-1"})
 
         self.assertEqual(response.status_code, 409)
         second.refresh_from_db()
@@ -278,7 +278,7 @@ class CheckoutAndPaymentTests(TestCase):
 
     def test_cancellation_refund_covers_only_what_is_left_to_refund(self) -> None:
         order = Order.objects.get(order_number=checkout(self.user, self.shop.order_payload(self.address)).data["order_number"])
-        post_callback(self.client, callback(order, "T-1"))
+        post_callback(callback(order, "T-1"))
         Order.objects.filter(pk=order.pk).update(
             payment_status=Order.PaymentStatus.PARTIALLY_REFUNDED, refunded_total=order.payable_total - Decimal("30")
         )
@@ -296,7 +296,7 @@ class CheckoutAndPaymentTests(TestCase):
 
     def test_cancellation_refund_is_refused_while_a_return_refund_is_open(self) -> None:
         order = Order.objects.get(order_number=checkout(self.user, self.shop.order_payload(self.address)).data["order_number"])
-        post_callback(self.client, callback(order, "T-1"))
+        post_callback(callback(order, "T-1"))
         OrderRefund.objects.create(order=order, amount=Decimal("10"), reason=OrderRefund.Reason.RETURN)
         admin = APIClient()
         admin.force_authenticate(make_staff("admin"))
@@ -306,7 +306,7 @@ class CheckoutAndPaymentTests(TestCase):
 
     def test_stale_return_transition_is_checked_against_the_locked_status(self) -> None:
         order = Order.objects.get(order_number=checkout(self.user, self.shop.order_payload(self.address)).data["order_number"])
-        post_callback(self.client, callback(order, "T-1"))
+        post_callback(callback(order, "T-1"))
         Order.objects.filter(pk=order.pk).update(order_status=Order.Status.DELIVERED)
         order.refresh_from_db()
         request = ReturnRequest.open(order, "Damaged", [(order.items.get(), Decimal("1"))], self.user)

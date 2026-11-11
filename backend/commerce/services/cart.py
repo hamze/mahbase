@@ -16,7 +16,7 @@ SESSION_MERGE_WARNINGS_KEY = "cart_merge_warnings"
 def line_variants() -> QuerySet:
     """Variants with everything needed to price and snapshot a line."""
     return ProductVariant.objects.select_related("product__unit", "product__category").prefetch_related(
-        "attributes__attribute"
+        "attributes__attribute", "product__media"
     )
 
 

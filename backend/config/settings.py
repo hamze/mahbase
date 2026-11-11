@@ -25,6 +25,8 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    # Listed for its Persian messages (locale); token_blacklist holds the models.
+    "rest_framework_simplejwt",
     "rest_framework_simplejwt.token_blacklist",
     "accounts",
     "catalog",
@@ -102,18 +104,32 @@ MEDIA_TEMPORARY_RETENTION_HOURS = int(os.environ.get("MEDIA_TEMPORARY_RETENTION_
 # Customer OTP login (see README "Customer authentication"). SMS_SENDER selects the SMS provider implementation.
 OTP_LENGTH = int(os.environ.get("OTP_LENGTH", 6))
 OTP_TTL_SECONDS = int(os.environ.get("OTP_TTL_SECONDS", 120))
-OTP_RESEND_SECONDS = int(os.environ.get("OTP_RESEND_SECONDS", 60))
+# One code per mobile and purpose per OTP_RESEND_SECONDS; requests per IP are throttled by the ``otp_ip`` rate.
+OTP_RESEND_SECONDS = int(os.environ.get("OTP_RESEND_SECONDS", 120))
 OTP_MAX_ATTEMPTS = int(os.environ.get("OTP_MAX_ATTEMPTS", 5))
+# SMS panel: accounts.services.sms.console.ConsoleSmsSender (development) or
+# accounts.services.sms.kavenegar.KavenegarSmsSender. Template names live in accounts/services/sms/templates.py.
 SMS_SENDER = os.environ.get("SMS_SENDER", "accounts.services.sms.console.ConsoleSmsSender")
+SMS_TIMEOUT_SECONDS = int(os.environ.get("SMS_TIMEOUT_SECONDS", 10))
+KAVENEGAR_API_KEY = os.environ.get("KAVENEGAR_API_KEY", "")
+KAVENEGAR_API_URL = os.environ.get("KAVENEGAR_API_URL", "https://api.kavenegar.com/v1")
 
 # Slugs of internal pages linked from the storefront menu; deleting such a page is refused.
 SITE_MENU_INTERNAL_PAGES = env_list("SITE_MENU_INTERNAL_PAGES", "")
 
 # Orders: stock is reserved at final confirmation for ORDER_RESERVATION_MINUTES (covers the bank session).
 ORDER_RESERVATION_MINUTES = int(os.environ.get("ORDER_RESERVATION_MINUTES", 15))
-PAYMENT_GATEWAY = os.environ.get("PAYMENT_GATEWAY", "commerce.services.payment_gateway.sandbox.SandboxPaymentGateway")
-PAYMENT_GATEWAY_SECRET = os.environ.get("PAYMENT_GATEWAY_SECRET", "")
-PAYMENT_GATEWAY_URL = os.environ.get("PAYMENT_GATEWAY_URL", "http://localhost:3000/payment/sandbox")
+# Public origin of the storefront; it also serves /api/, so the bank returns the customer to
+# STOREFRONT_URL/api/payments/return/ and the backend then redirects to STOREFRONT_URL/checkout/result.
+STOREFRONT_URL = os.environ.get("STOREFRONT_URL", "http://localhost:8081").rstrip("/")
+PAYMENT_CALLBACK_URL = f"{STOREFRONT_URL}/api/payments/return/"
+# Bank gateway (dotted class path). The mock bank (payment-mock/) is the only gateway for now.
+PAYMENT_GATEWAY = os.environ.get("PAYMENT_GATEWAY", "commerce.services.payment_gateway.mock_bank.MockBankGateway")
+PAYMENT_MERCHANT_ID = os.environ.get("PAYMENT_MERCHANT_ID", "mahbase-test-merchant")
+PAYMENT_GATEWAY_TIMEOUT_SECONDS = int(os.environ.get("PAYMENT_GATEWAY_TIMEOUT_SECONDS", 10))
+# Backend → mock bank (container network) and browser → mock bank.
+PAYMENT_MOCK_API_URL = os.environ.get("PAYMENT_MOCK_API_URL", "http://localhost:8090").rstrip("/")
+PAYMENT_MOCK_PUBLIC_URL = os.environ.get("PAYMENT_MOCK_PUBLIC_URL", "http://localhost:8090").rstrip("/")
 
 # Celery: worker + beat release expired reservations (commerce.tasks.release_expired_reservations).
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6380/0")
@@ -136,12 +152,18 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PAGINATION_CLASS": "catalog.pagination.CatalogPagination",
     "PAGE_SIZE": 50,
-    "EXCEPTION_HANDLER": "catalog.exceptions.exception_handler",
+    "EXCEPTION_HANDLER": "config.api.exceptions.exception_handler",
+    # Every JSON body is {"state", "message", "data"} (config.api.responses.Responses).
+    "DEFAULT_RENDERER_CLASSES": [
+        "config.api.renderers.EnvelopeJSONRenderer",
+        "rest_framework.renderers.BrowsableAPIRenderer",
+    ],
     # Contact-form spam guard at the API boundary (commerce.throttles), counted in the shared cache.
     "DEFAULT_THROTTLE_RATES": {
         "contact_ip": os.environ.get("CONTACT_RATE_IP", "1/min"),
         "contact_mobile_minute": os.environ.get("CONTACT_RATE_MOBILE_MINUTE", "1/min"),
         "contact_mobile_hour": os.environ.get("CONTACT_RATE_MOBILE_HOUR", "5/hour"),
+        "otp_ip": os.environ.get("OTP_RATE_IP", "30/hour"),
     },
 }
 
@@ -155,7 +177,8 @@ CACHES = {
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=int(os.environ.get("JWT_ACCESS_MINUTES", 5))),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=int(os.environ.get("JWT_REFRESH_DAYS", 1))),
+    # Customers: sliding session (rotation) that ends after this many days without a visit.
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=int(os.environ.get("JWT_REFRESH_DAYS", 90))),
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
     "UPDATE_LAST_LOGIN": True,
@@ -164,6 +187,9 @@ SIMPLE_JWT = {
     "TOKEN_OBTAIN_SERIALIZER": "accounts.tokens.PermissionTokenObtainPairSerializer",
     "TOKEN_REFRESH_SERIALIZER": "accounts.tokens.PermissionTokenRefreshSerializer",
 }
+
+# Staff refresh tokens (accounts.tokens.PermissionRefreshToken); matches the admin panel's refresh cookie.
+STAFF_REFRESH_TOKEN_LIFETIME = timedelta(days=int(os.environ.get("JWT_STAFF_REFRESH_DAYS", 1)))
 
 LOGGING = {
     "version": 1,

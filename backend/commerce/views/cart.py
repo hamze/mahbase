@@ -15,6 +15,7 @@ from commerce.services.cart import (
     priced_lines,
     set_cart_quantity,
 )
+from config.api import Responses
 
 
 def cart_response(request: Request) -> Response:
@@ -57,7 +58,7 @@ class CartItemsView(APIView):
     @staticmethod
     def store(request: Request, variant: ProductVariant, quantity: Decimal, response_status: int) -> Response:
         if errors := variant.purchase_errors(quantity):
-            return Response({"quantity": errors}, status=status.HTTP_400_BAD_REQUEST)
+            return Responses.get_response(Responses.GENERAL.WRONG_INPUTS, {"quantity": errors})
         set_cart_quantity(request, variant.pk, quantity)
         response = cart_response(request)
         response.status_code = response_status
@@ -73,7 +74,7 @@ class CartItemView(APIView):
         serializer = CartQuantitySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         if variant_id not in cart_quantities(request):
-            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Responses.get_response(Responses.GENERAL.NOT_FOUND)
         variant = ProductVariant.objects.select_related("product").get(pk=variant_id)
         return CartItemsView.store(request, variant, serializer.validated_data["quantity"], status.HTTP_200_OK)
 

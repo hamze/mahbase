@@ -10,8 +10,8 @@ from commerce.views.discount_code import AdminDiscountCodeViewSet, DiscountValid
 from commerce.views.faq import AdminFAQCategoryViewSet, AdminFAQViewSet, FAQCategoryListView, FAQListView
 from commerce.views.geo import AdminCityViewSet, AdminProvinceViewSet, CityListView, ProvinceListView
 from commerce.views.notification import AdminNotificationViewSet, MyNotificationViewSet
-from commerce.views.order import MyOrderViewSet, OrderCreateView
-from commerce.views.payment import PaymentCallbackView
+from commerce.views.order import MyOrderViewSet, OrderCreateView, OrderQuoteView
+from commerce.views.payment import PaymentReturnView
 from commerce.views.product_question import AdminProductQuestionViewSet, ProductQuestionListView
 from commerce.views.product_review import AdminProductReviewViewSet, ProductReviewListView
 from commerce.views.shipping_method import AdminShippingMethodViewSet, ShippingMethodListView
@@ -48,7 +48,8 @@ __all__ = [
     "FAQListView",
     "MyOrderViewSet",
     "OrderCreateView",
-    "PaymentCallbackView",
+    "OrderQuoteView",
+    "PaymentReturnView",
     "ProductQuestionListView",
     "ProvinceListView",
     "ShippingMethodListView",

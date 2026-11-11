@@ -31,9 +31,9 @@ class ContactMessage(models.Model):
 
     def set_status(self, status: str, note: str = "") -> None:
         if status not in self.TRANSITIONS[self.status]:
-            raise InvalidTransition(f"A contact message cannot move from {self.status} to {status}.")
+            raise InvalidTransition(f"وضعیت پیام تماس از {self.status} به {status} قابل تغییر نیست.")
         if self.status == self.Status.REPLIED and not note:
-            raise InvalidTransition("Reopening a replied message requires a note.")
+            raise InvalidTransition("بازگشایی پیام پاسخ‌داده‌شده نیاز به یادداشت دارد.")
         self.status = status
         if note:
             self.note = note

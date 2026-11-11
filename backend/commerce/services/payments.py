@@ -1,14 +1,55 @@
-"""Payment callback (``POST /api/payments/callback/``): idempotent, order locked first, then variants ascending."""
+"""Bank payments: start an attempt (request → redirect URL), then apply the verified result exactly once
+(``handle_callback``: idempotent, order locked first, then variants ascending).
+"""
 
 import logging
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from commerce.models import Order, OrderRefund, PaymentTransaction
+from commerce.models import Order, OrderRefund, PaymentAttempt, PaymentTransaction
+from commerce.services.payment_gateway.provider import get_payment_gateway
 
 logger = logging.getLogger(__name__)
+
+
+def start_payment(order: Order) -> str:
+    """Request a payment of ``payable_total`` from the bank and return the URL to send the customer to.
+
+    The bank returns the customer to ``PAYMENT_CALLBACK_URL``; raises when the bank refuses or is unreachable.
+    """
+    gateway = get_payment_gateway()
+    request = gateway.request_payment(order, settings.PAYMENT_CALLBACK_URL)
+    PaymentAttempt.objects.create(
+        order=order, gateway=gateway.name, authority=request.authority, amount=order.payable_total
+    )
+    return request.redirect_url
+
+
+def complete_return(authority: str, bank_status_ok: bool) -> tuple[Order, PaymentTransaction]:
+    """The customer came back from the bank: verify a reported success with the bank (never trust the redirect)
+    and apply the result. A repeated return of the same attempt answers with the transaction already recorded.
+
+    Raises ``PaymentAttempt.DoesNotExist`` for an unknown authority.
+    """
+    gateway = get_payment_gateway()
+    attempt = PaymentAttempt.objects.select_related("order").get(gateway=gateway.name, authority=authority)
+    succeeded, reference_id, amount, card_pan = False, None, attempt.amount, ""
+    if bank_status_ok:
+        succeeded, reference_id, amount, card_pan = gateway.verify(authority, attempt.amount)
+    payment = handle_callback(
+        order_number=attempt.order.order_number,
+        idempotency_key=f"{gateway.name}:{authority}",
+        gateway=gateway.name,
+        gateway_transaction_id=reference_id,
+        amount=amount,
+        succeeded=succeeded,
+        method="online",
+        raw_response={"authority": authority, "bank_status_ok": bank_status_ok, "card_pan": card_pan},
+    )
+    return attempt.order, payment
 
 
 class DuplicateGatewayTransaction(Exception):

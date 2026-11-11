@@ -37,6 +37,7 @@ services:
       DJANGO_MEDIA_ROOT: /srv/media
       CELERY_BROKER_URL: redis://redis:6379/0
       CACHE_URL: redis://redis:6379/1
+      PAYMENT_MOCK_API_URL: http://payment-mock:8090
     volumes:
       - media-data:/srv/media
       - static-data:/app/staticfiles
@@ -46,6 +47,8 @@ services:
       db:
         condition: service_healthy
       redis:
+        condition: service_started
+      payment-mock:
         condition: service_started
     networks:
       - mahbase
@@ -60,6 +63,8 @@ services:
       POSTGRES_HOST: db
       POSTGRES_PORT: "5432"
       CELERY_BROKER_URL: redis://redis:6379/0
+      CACHE_URL: redis://redis:6379/1
+      PAYMENT_MOCK_API_URL: http://payment-mock:8090
     depends_on:
       - backend
       - redis
@@ -80,7 +85,7 @@ services:
     networks:
       - mahbase
 
-  # Serves Django static/media files and proxies API and admin requests to gunicorn.
+  # Entry point (nginx/nginx.conf): :80 Django API/Admin + static/media, :8081 storefront, :3000 admin panel.
   proxy:
     image: nginx:1.27-alpine
     container_name: mahbase-proxy
@@ -90,23 +95,51 @@ services:
       - static-data:/srv/static:ro
     ports:
       - "${PROXY_HOST_PORT:-8080}:80"
+      - "${STOREFRONT_HOST_PORT:-8081}:8081"
+      - "${ADMIN_PANEL_HOST_PORT:-3000}:3000"
     depends_on:
       - backend
+      - frontend
+      - admin-panel
     networks:
       - mahbase
 
-  frontend:
-    build: ./frontend
-    container_name: mahbase-frontend
+  admin-panel:
+    build: ./admin-panel
+    container_name: mahbase-admin-panel
     environment:
       BACKEND_URL: http://proxy
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       JWT_ACCESS_COOKIE_SECONDS: ${JWT_ACCESS_COOKIE_SECONDS:-240}
       JWT_REFRESH_COOKIE_SECONDS: ${JWT_REFRESH_COOKIE_SECONDS:-86400}
+    # Served to browsers through proxy:3000; the direct port is for debugging the Next.js server alone.
     ports:
-      - "${FRONTEND_HOST_PORT:-3000}:3000"
-    depends_on:
-      - proxy
+      - "${ADMIN_PANEL_DIRECT_HOST_PORT:-3001}:3000"
+    networks:
+      - mahbase
+
+  # Customer storefront (Next.js): server-renders the pages for search engines and forwards /api/ and /media/ to
+  # the backend proxy, so the storefront and the API share one origin (guest cart session cookie, bank return URL).
+  frontend:
+    build: ./frontend
+    container_name: mahbase-frontend
+    environment:
+      BACKEND_URL: http://proxy
+      STOREFRONT_URL: ${STOREFRONT_URL:-http://localhost:8081}
+    # Served to browsers through proxy:8081; the direct port is for debugging the Next.js server alone.
+    ports:
+      - "${STOREFRONT_DIRECT_HOST_PORT:-3002}:3000"
+    networks:
+      - mahbase
+
+  # Mock Iranian bank gateway (development/test only): the backend calls it, customers open its pay page.
+  payment-mock:
+    build: ./payment-mock
+    container_name: mahbase-payment-mock
+    environment:
+      MOCK_BANK_MERCHANT_ID: ${PAYMENT_MERCHANT_ID:-mahbase-test-merchant}
+    ports:
+      - "${PAYMENT_MOCK_HOST_PORT:-8090}:8090"
     networks:
       - mahbase
 

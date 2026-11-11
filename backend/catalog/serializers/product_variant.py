@@ -35,12 +35,12 @@ class ProductVariantSerializer(ModelCleanSerializer):
         attrs = super().validate(attrs)
         user = self.context["request"].user
         if self._changes(attrs, PRICE_FIELDS) and not has_permission(user, "products.edit_price"):
-            raise PermissionDenied("You do not have permission to edit prices.")
+            raise PermissionDenied("اجازه ویرایش قیمت‌ها را ندارید.")
         if self._changes(attrs, ["stock_quantity"]):
             if self.instance is not None:
-                raise serializers.ValidationError({"stock_quantity": "Use the stock endpoint to change stock."})
+                raise serializers.ValidationError({"stock_quantity": "برای تغییر موجودی از بخش موجودی استفاده کنید."})
             if not has_permission(user, "products.edit_stock"):
-                raise PermissionDenied("You do not have permission to edit stock.")
+                raise PermissionDenied("اجازه ویرایش موجودی را ندارید.")
         product = self.context.get("product")
         if product is not None:
             attrs["attributes"] = Attribute.validate_values(
@@ -116,5 +116,5 @@ class StockUpdateSerializer(serializers.Serializer):
 
     def validate(self, attrs: dict) -> dict:
         if len(set(attrs) - {"confirm"}) != 1:
-            raise serializers.ValidationError("Provide exactly one of 'stock_quantity' or 'delta'.")
+            raise serializers.ValidationError("دقیقا یکی از stock_quantity یا delta را بفرستید.")
         return attrs

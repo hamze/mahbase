@@ -1,0 +1,165 @@
+# Server stack behind an existing Traefik (external network `traefik-proxy`). Only nginx (proxy) and the mock bank's
+# pay page are routed by Traefik; nothing publishes a host port. Configuration comes from .env; see README.
+#   docker compose -f docker-compose.server.yml up --build -d
+services:
+  db:
+    image: postgres:16
+    container_name: mahbase-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+    networks: [mahbase]
+
+  redis:
+    image: redis:7-alpine
+    container_name: mahbase-redis
+    restart: unless-stopped
+    networks: [mahbase]
+
+  backend:
+    build: ./backend
+    container_name: mahbase-backend
+    env_file: .env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      DJANGO_MEDIA_ROOT: /srv/media
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CACHE_URL: redis://redis:6379/1
+      PAYMENT_MOCK_API_URL: http://payment-mock:8090
+    volumes:
+      - media-data:/srv/media
+      - static-data:/app/staticfiles
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      payment-mock:
+        condition: service_started
+    restart: unless-stopped
+    networks: [mahbase]
+
+  worker:
+    build: ./backend
+    container_name: mahbase-worker
+    command: celery -A config worker --loglevel=INFO
+    env_file: .env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CACHE_URL: redis://redis:6379/1
+      PAYMENT_MOCK_API_URL: http://payment-mock:8090
+    depends_on:
+      - backend
+      - redis
+    restart: unless-stopped
+    networks: [mahbase]
+
+  beat:
+    build: ./backend
+    container_name: mahbase-beat
+    command: celery -A config beat --loglevel=INFO --schedule /tmp/celerybeat-schedule
+    env_file: .env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      CELERY_BROKER_URL: redis://redis:6379/0
+    depends_on:
+      - redis
+    restart: unless-stopped
+    networks: [mahbase]
+
+  admin-panel:
+    build: ./admin-panel
+    container_name: mahbase-admin-panel
+    environment:
+      BACKEND_URL: http://proxy
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      JWT_ACCESS_COOKIE_SECONDS: ${JWT_ACCESS_COOKIE_SECONDS:-240}
+      JWT_REFRESH_COOKIE_SECONDS: ${JWT_REFRESH_COOKIE_SECONDS:-86400}
+    restart: unless-stopped
+    networks: [mahbase]
+
+  frontend:
+    build: ./frontend
+    container_name: mahbase-frontend
+    environment:
+      BACKEND_URL: http://proxy
+      STOREFRONT_URL: ${STOREFRONT_URL}
+    restart: unless-stopped
+    networks: [mahbase]
+
+  # Same nginx/nginx.conf as the local stack. Traefik picks the nginx server by domain:
+  #   SITE_DOMAIN                        -> :8081 storefront
+  #   ADMIN_DOMAIN                       -> :3000 admin panel (/manage)
+  #   ADMIN_DOMAIN /admin/ and /static/  -> :80   Django Admin and its static files
+  proxy:
+    image: nginx:1.27-alpine
+    container_name: mahbase-proxy
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - media-data:/srv/media:ro
+      - static-data:/srv/static:ro
+    depends_on:
+      - backend
+      - frontend
+      - admin-panel
+    restart: unless-stopped
+    networks: [mahbase, traefik-proxy]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-proxy"
+
+      - "traefik.http.routers.mahbase-storefront.rule=Host(`${SITE_DOMAIN:?set SITE_DOMAIN}`)"
+      - "traefik.http.routers.mahbase-storefront.entrypoints=${TRAEFIK_ENTRYPOINT:-web}"
+      - "traefik.http.routers.mahbase-storefront.service=mahbase-storefront"
+      - "traefik.http.services.mahbase-storefront.loadbalancer.server.port=8081"
+
+      - "traefik.http.routers.mahbase-admin-panel.rule=Host(`${ADMIN_DOMAIN:?set ADMIN_DOMAIN}`)"
+      - "traefik.http.routers.mahbase-admin-panel.entrypoints=${TRAEFIK_ENTRYPOINT:-web}"
+      - "traefik.http.routers.mahbase-admin-panel.priority=10"
+      - "traefik.http.routers.mahbase-admin-panel.service=mahbase-admin-panel"
+      - "traefik.http.services.mahbase-admin-panel.loadbalancer.server.port=3000"
+
+      - "traefik.http.routers.mahbase-django.rule=Host(`${ADMIN_DOMAIN}`) && (PathPrefix(`/admin/`) || PathPrefix(`/static/`))"
+      - "traefik.http.routers.mahbase-django.entrypoints=${TRAEFIK_ENTRYPOINT:-web}"
+      - "traefik.http.routers.mahbase-django.priority=100"
+      - "traefik.http.routers.mahbase-django.service=mahbase-django"
+      - "traefik.http.services.mahbase-django.loadbalancer.server.port=80"
+
+  # The only payment gateway implemented so far; customers are sent to its pay page (PAYMENT_MOCK_PUBLIC_URL).
+  payment-mock:
+    build: ./payment-mock
+    container_name: mahbase-payment-mock
+    environment:
+      MOCK_BANK_MERCHANT_ID: ${PAYMENT_MERCHANT_ID:-mahbase-test-merchant}
+    restart: unless-stopped
+    networks: [mahbase, traefik-proxy]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-proxy"
+      - "traefik.http.routers.mahbase-payment-mock.rule=Host(`${PAYMENT_MOCK_DOMAIN:?set PAYMENT_MOCK_DOMAIN}`)"
+      - "traefik.http.routers.mahbase-payment-mock.entrypoints=${TRAEFIK_ENTRYPOINT:-web}"
+      - "traefik.http.services.mahbase-payment-mock.loadbalancer.server.port=8090"
+
+networks:
+  mahbase:
+    name: mahbase
+  traefik-proxy:
+    external: true
+    name: traefik-proxy
+
+volumes:
+  postgres-data:
+  media-data:
+  static-data:

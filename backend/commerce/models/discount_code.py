@@ -64,13 +64,13 @@ class DiscountCode(models.Model):
     def clean(self) -> None:
         errors = {}
         if self.product_discount_type == self.ProductDiscountType.FIXED_AMOUNT and not self.amount:
-            errors["amount"] = "A fixed discount needs an amount."
+            errors["amount"] = "تخفیف مبلغ ثابت نیاز به مبلغ دارد."
         if self.product_discount_type == self.ProductDiscountType.PERCENTAGE and not self.percentage:
-            errors["percentage"] = "A percentage discount needs a percentage."
+            errors["percentage"] = "تخفیف درصدی نیاز به درصد دارد."
         if self.product_discount_type == self.ProductDiscountType.NONE and not self.free_shipping:
-            errors["product_discount_type"] = "A code without a product discount must give free shipping."
+            errors["product_discount_type"] = "کد بدون تخفیف کالا باید ارسال رایگان داشته باشد."
         if self.ends_at and self.starts_at and self.ends_at <= self.starts_at:
-            errors["ends_at"] = "The end must be after the start."
+            errors["ends_at"] = "زمان پایان باید بعد از زمان شروع باشد."
         if errors:
             raise ValidationError(errors)
 
@@ -87,17 +87,17 @@ class DiscountCode(models.Model):
         now = timezone.now()
         errors = []
         if not self.is_active or now < self.starts_at or (self.ends_at and now >= self.ends_at):
-            errors.append("This discount code is not active.")
+            errors.append("این کد تخفیف فعال نیست.")
         if self.usage_limit_total is not None and self.used_count >= self.usage_limit_total:
-            errors.append("This discount code has reached its usage limit.")
+            errors.append("ظرفیت استفاده از این کد تخفیف تمام شده است.")
         if self.specific_mobile and self.specific_mobile != user.get_username():
-            errors.append("This discount code is not valid for your account.")
+            errors.append("این کد تخفیف برای حساب شما معتبر نیست.")
         used_by_user = Order.objects.filter(user=user, discount_code=self, coupon_consumed=True).count()
         if used_by_user >= self.per_user_limit:
-            errors.append("You have already used this discount code.")
+            errors.append("شما قبلا از این کد تخفیف استفاده کرده‌اید.")
         eligible = sum((total for product, total in lines if self.is_eligible(product)), Decimal("0"))
         if eligible == 0 or eligible < self.min_eligible_subtotal:
-            errors.append("The eligible cart subtotal is below the minimum for this code.")
+            errors.append("جمع خرید مشمول کمتر از حداقل مبلغ این کد است.")
         if errors:
             raise ValidationError({"discount_code": errors})
 

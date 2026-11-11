@@ -12,7 +12,7 @@ class StrictSerializer(serializers.Serializer):
         if isinstance(data, dict):
             unknown = set(data) - set(self.fields)
             if unknown:
-                raise serializers.ValidationError({key: "Unknown field." for key in sorted(unknown)})
+                raise serializers.ValidationError({key: "فیلد ناشناخته." for key in sorted(unknown)})
         return super().to_internal_value(data)
 
 
@@ -37,7 +37,7 @@ def badges_with_urls(badges: list[dict]) -> list[dict]:
 
 
 class PublicStoreSettingsSerializer(serializers.ModelSerializer):
-    """Storefront projection: no profit percentage or SMS switch."""
+    """Storefront projection: no profit percentage, SMS switch or badge rules."""
 
     logo_url = serializers.SerializerMethodField()
     trust_badges = serializers.SerializerMethodField()
@@ -46,7 +46,8 @@ class PublicStoreSettingsSerializer(serializers.ModelSerializer):
         model = StoreSettings
         fields = [
             "store_name", "logo_url", "primary_color", "contact_phone", "contact_email", "address", "social_links",
-            "trust_badges", "reviews_enabled", "cod_enabled", "out_of_stock_display", "footer_text",
+            "trust_badges", "reviews_enabled", "out_of_stock_display", "footer_text", "packaging_fee",
+            "tax_percentage",
         ]
         read_only_fields = fields
 
@@ -71,7 +72,8 @@ class StoreSettingsSerializer(serializers.ModelSerializer):
         model = StoreSettings
         fields = [
             "store_name", "logo", "logo_url", "primary_color", "contact_phone", "contact_email", "address",
-            "social_links", "trust_badges", "default_profit_percentage", "reviews_enabled", "cod_enabled",
+            "social_links", "trust_badges", "default_profit_percentage", "reviews_enabled", "packaging_fee",
+            "tax_percentage", "new_product_days", "bestseller_count",
             "out_of_stock_display", "sms_notifications_enabled", "footer_text", "updated_at",
         ]
         read_only_fields = ["updated_at"]
@@ -86,20 +88,20 @@ class StoreSettingsSerializer(serializers.ModelSerializer):
 
     def validate_logo(self, logo: MediaAsset | None) -> MediaAsset | None:
         if logo is not None and not self._is_new_or_owned(logo, MediaAsset.ImageType.STORE_LOGO):
-            raise serializers.ValidationError("The logo must be a new upload or the current logo.")
+            raise serializers.ValidationError("لوگو باید آپلود جدید یا لوگوی فعلی باشد.")
         return logo
 
     def validate_trust_badges(self, badges: list[dict]) -> list[dict]:
         ids = [badge["image_id"] for badge in badges]
         if len(set(ids)) != len(ids):
-            raise serializers.ValidationError("Each trust badge image can be used once.")
+            raise serializers.ValidationError("هر تصویر نماد اعتماد فقط یک بار قابل استفاده است.")
         assets = MediaAsset.objects.in_bulk(ids)
         invalid = [
             pk for pk in ids
             if pk not in assets or not self._is_new_or_owned(assets[pk], MediaAsset.ImageType.TRUST_BADGE)
         ]
         if invalid:
-            raise serializers.ValidationError(f"Images {invalid} must be new uploads or current trust badges.")
+            raise serializers.ValidationError(f"تصاویر {invalid} باید آپلود جدید یا نمادهای اعتماد فعلی باشند.")
         return [dict(badge) for badge in badges]
 
     def update(self, settings: StoreSettings, validated_data: dict) -> StoreSettings:

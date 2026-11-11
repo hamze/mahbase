@@ -61,7 +61,7 @@ class MediaUploadSerializer(serializers.ModelSerializer):
         user = self.context["request"].user
         for name in owners:
             if not any(has_permission(user, code) for code in OWNER_WRITE_PERMISSIONS[name]):
-                raise PermissionDenied(f"You do not have permission to attach media to this {name}.")
+                raise PermissionDenied(f"اجازه افزودن رسانه به این {name} را ندارید.")
         attrs["file"] = MediaAsset.convert_upload(attrs["file"])
         return attrs
 

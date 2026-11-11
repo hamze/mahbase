@@ -61,7 +61,7 @@ class OrderItem(models.Model):
     def transition_preparation_status(self, new_status: str) -> None:
         """Validate and set ``preparation_status`` (caller saves); raises ``InvalidTransition``."""
         if new_status not in self.PREPARATION_TRANSITIONS.get(self.preparation_status, set()):
-            raise InvalidTransition(f"Preparation status cannot change from {self.preparation_status} to {new_status}.")
+            raise InvalidTransition(f"وضعیت آماده‌سازی از {self.preparation_status} به {new_status} قابل تغییر نیست.")
         self.preparation_status = new_status
 
     @classmethod

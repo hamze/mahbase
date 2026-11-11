@@ -10,6 +10,9 @@ class FAQ(models.Model):
     answer = models.TextField()
     is_active = models.BooleanField(default=True)
     sort_order = models.IntegerField(default=0)
+    # Shown in the home page FAQ block, ordered by ``home_sort_order``.
+    show_on_home = models.BooleanField(default=False)
+    home_sort_order = models.IntegerField(default=0)
     created_by_admin = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
     )

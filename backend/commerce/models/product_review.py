@@ -60,7 +60,7 @@ class ProductReview(models.Model):
                 .first()
             )
             if order is None:
-                raise ValidationError("Only customers with a delivered order of this product can review it.")
+                raise ValidationError("فقط مشتریانی که این محصول را خریده و تحویل گرفته‌اند می‌توانند نظر ثبت کنند.")
             return cls.objects.create(product=product, user=user, order=order, rating=rating, title=title, body=body)
 
     def approve(self, moderator: User) -> None:
@@ -76,11 +76,10 @@ class ProductReview(models.Model):
             self.moderated_by = moderator
             self.moderated_at = timezone.now()
             self.save(update_fields=["status", "reject_reason", "moderated_by", "moderated_at", "updated_at"])
-            Notification.objects.create(
-                user=self.user,
-                type=Notification.Type.REVIEW,
-                title="نظر شما تأیید شد" if status == self.Status.APPROVED else "نظر شما رد شد",
-                body=reason or self.product.name,
-                related_object_type="review",
-                related_object_id=self.pk,
+            Notification.notify(
+                self.user,
+                Notification.Type.REVIEW,
+                "نظر شما تأیید شد" if status == self.Status.APPROVED else "نظر شما رد شد",
+                reason or self.product.name,
+                related=("review", self.pk),
             )

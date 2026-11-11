@@ -61,7 +61,7 @@ class ReturnRequest(models.Model):
         if order.order_status != Order.Status.DELIVERED or order.payment_status not in (
             Order.PaymentStatus.PAID, Order.PaymentStatus.PARTIALLY_REFUNDED
         ):
-            raise InvalidTransition("Only delivered, paid orders can be returned.")
+            raise InvalidTransition("فقط سفارش‌های پرداخت‌شده و تحویل‌شده قابل مرجوعی هستند.")
         errors = []
         for order_item, quantity in items:
             pending = (
@@ -70,11 +70,11 @@ class ReturnRequest(models.Model):
                 or 0
             )
             if order_item.order_id != order.pk:
-                errors.append(f"Item {order_item.pk} does not belong to this order.")
+                errors.append(f"قلم {order_item.pk} متعلق به این سفارش نیست.")
             elif quantity <= 0 or quantity > order_item.quantity - order_item.returned_quantity - pending:
-                errors.append(f"{order_item.sku_snapshot}: invalid return quantity.")
+                errors.append(f"{order_item.sku_snapshot}: مقدار مرجوعی نامعتبر است.")
         if not items or errors:
-            raise ValidationError({"items": errors or ["Select at least one item."]})
+            raise ValidationError({"items": errors or ["حداقل یک قلم انتخاب کنید."]})
         request = cls.objects.create(order=order, reason=reason, requested_by=requested_by)
         ReturnRequestItem.objects.bulk_create(
             ReturnRequestItem(return_request=request, order_item=order_item, quantity=quantity)
@@ -99,7 +99,7 @@ class ReturnRequest(models.Model):
         with transaction.atomic():
             self._lock()
             if self.status not in allowed_from:
-                raise InvalidTransition(f"Return request cannot change from {self.status} to {new_status}.")
+                raise InvalidTransition(f"وضعیت درخواست مرجوعی از {self.status} به {new_status} قابل تغییر نیست.")
             self.status = new_status
             self.save(update_fields=["status", "updated_at"])
 
@@ -116,7 +116,7 @@ class ReturnRequest(models.Model):
         """APPROVED → RECEIVED with ``resaleable`` given for every item (keyed by return item id)."""
         items = list(self.items.all())
         if {item.pk for item in items} != set(resaleable):
-            raise ValidationError({"items": "Set 'resaleable' for every returned item."})
+            raise ValidationError({"items": "برای همه اقلام مرجوعی قابل فروش بودن را مشخص کنید."})
         with transaction.atomic():
             self._move({self.Status.APPROVED}, self.Status.RECEIVED)
             for item in items:
@@ -137,10 +137,10 @@ class ReturnRequest(models.Model):
         with transaction.atomic():
             self._lock()
             if self.status != self.Status.RECEIVED or self.order_refund_id is not None:
-                raise InvalidTransition("Only received returns without a refund can be completed.")
+                raise InvalidTransition("فقط مرجوعی‌های دریافت‌شده بدون بازگشت وجه قابل تکمیل هستند.")
             self.refund_amount = self.default_refund_amount() if amount is None else amount
             if not 0 < self.refund_amount <= self.order.refundable_amount():
-                raise ValidationError({"refund_amount": "The refund amount exceeds what is left to refund."})
+                raise ValidationError({"refund_amount": "مبلغ بازگشت وجه بیشتر از مبلغ باقی‌مانده است."})
             refund = OrderRefund.objects.create(
                 order=self.order, amount=self.refund_amount, reason=OrderRefund.Reason.RETURN, requested_by=self.requested_by
             )

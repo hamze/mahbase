@@ -5,6 +5,7 @@ from django.db import models
 from django.db.models import Q
 
 from catalog.models.product import sanitize_html
+from catalog.models.product_variant import PRICE
 
 SINGLETON_ID = 1
 SOCIAL_LINK_KEYS = ("instagram", "telegram", "whatsapp", "twitter", "linkedin", "youtube", "aparat")
@@ -28,7 +29,7 @@ class StoreSettings(models.Model):
         max_length=7, default="#4f46e5", validators=[RegexValidator(r"^#[0-9A-Fa-f]{6}$", "Use a #RRGGBB color.")]
     )
     contact_phone = models.CharField(
-        max_length=11, blank=True, validators=[RegexValidator(r"^0\d{10}$", "Use an 11-digit number starting with 0.")]
+        max_length=11, blank=True, validators=[RegexValidator(r"^0\d{10}$", "شماره ۱۱ رقمی که با ۰ شروع می‌شود وارد کنید.")]
     )
     contact_email = models.EmailField(blank=True)
     address = models.TextField(blank=True)
@@ -39,7 +40,17 @@ class StoreSettings(models.Model):
         validators=[MinValueValidator(Decimal("0")), MaxValueValidator(Decimal("100"))],
     )
     reviews_enabled = models.BooleanField(default=True)
-    cod_enabled = models.BooleanField(default=False)
+    # Added to every order (Toman); 0 hides the line on the storefront and shows 0 on the invoice.
+    packaging_fee = models.DecimalField(**PRICE, default=Decimal("0"), validators=[MinValueValidator(Decimal("0"))])
+    # Tax on (products after discounts + packaging + shipping); 0 hides it the same way.
+    tax_percentage = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal("0"),
+        validators=[MinValueValidator(Decimal("0")), MaxValueValidator(Decimal("100"))],
+    )
+    # «جدید» badge: products created within this many days (0 = no badge).
+    new_product_days = models.PositiveSmallIntegerField(default=14)
+    # «پرفروش» badge: the top N products by recent sales (0 = no badge).
+    bestseller_count = models.PositiveSmallIntegerField(default=10)
     out_of_stock_display = models.CharField(
         max_length=20, choices=OutOfStockDisplay.choices, default=OutOfStockDisplay.SHOW_WITH_BADGE
     )
@@ -50,6 +61,10 @@ class StoreSettings(models.Model):
     class Meta:
         constraints = [
             models.CheckConstraint(name="store_settings_singleton", condition=Q(id=SINGLETON_ID)),
+            models.CheckConstraint(name="store_settings_packaging_non_negative", condition=Q(packaging_fee__gte=0)),
+            models.CheckConstraint(
+                name="store_settings_tax_0_100", condition=Q(tax_percentage__gte=0, tax_percentage__lte=100)
+            ),
             models.CheckConstraint(
                 name="store_settings_profit_0_100",
                 condition=Q(default_profit_percentage__gte=0, default_profit_percentage__lte=100),

@@ -14,6 +14,9 @@ class OTPCode(models.Model):
     class Purpose(models.TextChoices):
         LOGIN = "LOGIN"
         RESET_PASSWORD = "RESET_PASSWORD"
+        # A mobile change needs a code sent to the current number and one sent to the new number.
+        MOBILE_CHANGE_OLD = "MOBILE_CHANGE_OLD"
+        MOBILE_CHANGE_NEW = "MOBILE_CHANGE_NEW"
 
     mobile = models.CharField(max_length=11)
     purpose = models.CharField(max_length=20, choices=Purpose.choices)
@@ -37,7 +40,7 @@ class OTPCode(models.Model):
         now = timezone.now()
         recent = now - timedelta(seconds=settings.OTP_RESEND_SECONDS)
         if cls.objects.filter(mobile=mobile, purpose=purpose, created_at__gt=recent).exists():
-            raise ValidationError({"mobile": "A code was sent recently. Please wait before requesting another."})
+            raise ValidationError({"mobile": "کد به‌تازگی ارسال شده است؛ لطفا کمی بعد دوباره تلاش کنید."})
         code = f"{secrets.randbelow(10 ** settings.OTP_LENGTH):0{settings.OTP_LENGTH}d}"
         cls.objects.create(
             mobile=mobile,
@@ -49,22 +52,34 @@ class OTPCode(models.Model):
 
     @classmethod
     def verify(cls, mobile: str, purpose: str, code: str) -> bool:
-        """Atomic check: lock the newest code, reject consumed/expired/exhausted, count the attempt, consume on match.
+        return cls.verify_all([(mobile, purpose, code)])[0]
 
-        The attempt is committed even when the code does not match.
+    @classmethod
+    def verify_all(cls, checks: list[tuple[str, str, str]]) -> list[bool]:
+        """Atomic check of ``(mobile, purpose, code)`` codes that only work together: lock each newest code, reject
+        consumed/expired/exhausted ones, count an attempt on each, and consume them only when every code matches.
+
+        Returns the per-code result. The attempts are committed even when a code does not match.
         """
         with transaction.atomic():
-            otp = cls.objects.select_for_update().filter(mobile=mobile, purpose=purpose).first()
-            if (
-                otp is None
-                or otp.consumed_at is not None
-                or otp.expires_at <= timezone.now()
-                or otp.attempts >= settings.OTP_MAX_ATTEMPTS
-            ):
-                return False
-            otp.attempts += 1
-            matched = constant_time_compare(otp.code_hash, cls.hash_code(mobile, purpose, code))
-            if matched:
-                otp.consumed_at = timezone.now()
-            otp.save(update_fields=["attempts", "consumed_at"])
-        return matched
+            found = []
+            for mobile, purpose, code in checks:
+                otp = cls.objects.select_for_update().filter(mobile=mobile, purpose=purpose).first()
+                if (
+                    otp is None
+                    or otp.consumed_at is not None
+                    or otp.expires_at <= timezone.now()
+                    or otp.attempts >= settings.OTP_MAX_ATTEMPTS
+                ):
+                    found.append((None, False))
+                    continue
+                otp.attempts += 1
+                found.append((otp, constant_time_compare(otp.code_hash, cls.hash_code(mobile, purpose, code))))
+            all_matched = all(matched for _, matched in found)
+            for otp, _ in found:
+                if otp is None:
+                    continue
+                if all_matched:
+                    otp.consumed_at = timezone.now()
+                otp.save(update_fields=["attempts", "consumed_at"])
+        return [matched for _, matched in found]

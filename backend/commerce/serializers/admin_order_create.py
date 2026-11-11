@@ -31,14 +31,14 @@ class AdminOrderCreateSerializer(serializers.Serializer):
     def validate(self, attrs: dict) -> dict:
         customer, new_customer = attrs.get("customer"), attrs.get("new_customer")
         if (customer is None) == (new_customer is None):
-            raise serializers.ValidationError({"customer": "Select a customer or enter a new one."})
+            raise serializers.ValidationError({"customer": "یک مشتری انتخاب کنید یا مشتری جدید وارد کنید."})
         if (attrs.get("address") is None) == (attrs.get("new_address") is None):
-            raise serializers.ValidationError({"address": "Select an address or enter a new one."})
+            raise serializers.ValidationError({"address": "یک آدرس انتخاب کنید یا آدرس جدید وارد کنید."})
         if new_customer is not None and attrs.get("address") is not None:
-            raise serializers.ValidationError({"address": "A new customer needs a new address."})
+            raise serializers.ValidationError({"address": "مشتری جدید باید آدرس جدید داشته باشد."})
         variant_ids = [line["variant"] for line in attrs["items"]]
         if len(variant_ids) != len(set(variant_ids)):
-            raise serializers.ValidationError({"items": "Each variant may appear only once."})
+            raise serializers.ValidationError({"items": "هر تنوع فقط یک بار می‌تواند در سفارش بیاید."})
         if new_customer is not None:
             attrs["new_customer"] = {
                 "mobile": new_customer["username"],

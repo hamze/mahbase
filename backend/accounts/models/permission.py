@@ -19,5 +19,5 @@ class Permission(models.Model):
 
     def save(self, *args, **kwargs) -> None:
         if self.pk and Permission.objects.filter(pk=self.pk).exclude(code=self.code).exists():
-            raise ValidationError({"code": "A permission code cannot be changed."})
+            raise ValidationError({"code": "کد دسترسی قابل تغییر نیست."})
         super().save(*args, **kwargs)

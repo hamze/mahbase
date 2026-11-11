@@ -14,5 +14,8 @@ class FAQSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = FAQ
-        fields = ["id", "category", "question", "answer", "is_active", "sort_order", "created_at", "updated_at"]
+        fields = [
+            "id", "category", "question", "answer", "is_active", "sort_order", "show_on_home", "home_sort_order",
+            "created_at", "updated_at",
+        ]
         read_only_fields = ["created_at", "updated_at"]

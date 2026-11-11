@@ -130,7 +130,7 @@ class ProductApiTests(TestCase):
                        variants=[{"sku": "KID-2", "attributes": []}])
         response = self.client.post("/api/products/", payload, format="json")
         self.assertEqual(response.status_code, 400)
-        self.assertIn("tags", response.data)
+        self.assertIn("tags", response.data["data"])
 
     def test_category_change_revalidates_assignments(self) -> None:
         product = self.data.create_product()
@@ -143,7 +143,7 @@ class ProductApiTests(TestCase):
         self.data.size.categories.add(self.data.other_category)
         response = self.client.put(f"/api/products/{product.pk}/", payload, format="json")
         self.assertEqual(response.status_code, 400)
-        self.assertIn("brand", response.data)
+        self.assertIn("brand", response.data["data"])
 
     def test_soft_delete_restore_keep_publication_state(self) -> None:
         product = self.data.create_product()

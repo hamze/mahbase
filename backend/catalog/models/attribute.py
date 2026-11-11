@@ -30,7 +30,7 @@ class Attribute(models.Model):
         stored = Attribute.objects.get(pk=self.pk)
         changed = stored.type != self.type or stored.is_variant_generator != self.is_variant_generator
         if changed and stored.is_referenced():
-            raise ValidationError("The type or variant role of an attribute used by products cannot change.")
+            raise ValidationError("نوع یا نقش تنوع ویژگی‌ای که در محصولات استفاده شده قابل تغییر نیست.")
 
     def is_referenced(self) -> bool:
         return self.product_values.exists() or self.variant_values.exists()
@@ -38,7 +38,7 @@ class Attribute(models.Model):
     def normalize_value(self, value: str) -> str:
         value = str(value).strip()
         if not value:
-            raise ValidationError(f"A value is required for attribute '{self.name}'.")
+            raise ValidationError(f"مقدار ویژگی «{self.name}» الزامی است.")
         if self.type == self.Type.SELECT:
             if not self.options.filter(value=value, is_active=True).exists():
                 raise ValidationError(f"'{value}' is not an allowed option for attribute '{self.name}'.")
@@ -46,7 +46,7 @@ class Attribute(models.Model):
             try:
                 value = str(Decimal(value).normalize())
             except InvalidOperation:
-                raise ValidationError(f"Attribute '{self.name}' requires a number.")
+                raise ValidationError(f"مقدار ویژگی «{self.name}» باید عدد باشد.")
         return value
 
     @classmethod
@@ -66,15 +66,15 @@ class Attribute(models.Model):
         )
         for attribute, value in pairs:
             if attribute.pk in seen:
-                errors.append(f"Attribute '{attribute.name}' is given more than once.")
+                errors.append(f"ویژگی «{attribute.name}» بیش از یک بار داده شده است.")
                 continue
             seen.add(attribute.pk)
             if attribute.pk not in allowed_ids:
-                errors.append(f"Attribute '{attribute.name}' does not belong to the product category.")
+                errors.append(f"ویژگی «{attribute.name}» متعلق به دسته‌بندی محصول نیست.")
                 continue
             if attribute.is_variant_generator != variant_generator:
                 kind = "variant-generating" if variant_generator else "descriptive"
-                errors.append(f"Attribute '{attribute.name}' is not a {kind} attribute.")
+                errors.append(f"ویژگی «{attribute.name}» از نوع {kind} نیست.")
                 continue
             try:
                 normalized.append((attribute, attribute.normalize_value(value)))

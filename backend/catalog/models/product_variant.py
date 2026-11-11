@@ -81,15 +81,15 @@ class ProductVariant(models.Model):
     def clean(self) -> None:
         errors = {}
         if self.stock_quantity is not None and self.stock_quantity < 0:
-            errors["stock_quantity"] = "Stock cannot be negative."
+            errors["stock_quantity"] = "موجودی نمی‌تواند منفی باشد."
         if self.purchase_step is not None and self.purchase_step <= 0:
-            errors["purchase_step"] = "Purchase step must be greater than zero."
+            errors["purchase_step"] = "گام خرید باید بزرگتر از صفر باشد."
         if self.min_purchase is not None and self.min_purchase <= 0:
-            errors["min_purchase"] = "Minimum purchase must be greater than zero."
+            errors["min_purchase"] = "حداقل خرید باید بزرگتر از صفر باشد."
         if None not in (self.min_purchase, self.max_purchase) and self.max_purchase < self.min_purchase:
-            errors["max_purchase"] = "Maximum purchase must be at least the minimum purchase."
+            errors["max_purchase"] = "حداکثر خرید باید حداقل برابر حداقل خرید باشد."
         if self.pack_size is not None and self.pack_size <= 0:
-            errors["pack_size"] = "Pack size must be greater than zero."
+            errors["pack_size"] = "اندازه بسته باید بزرگتر از صفر باشد."
         if errors:
             raise ValidationError(errors)
 
@@ -104,17 +104,17 @@ class ProductVariant(models.Model):
         """Purchase rules for one cart/order line (step, min/max, availability); empty when the line is valid."""
         errors = []
         if not self.is_sellable():
-            errors.append("This product is not available for sale.")
+            errors.append("این محصول برای فروش در دسترس نیست.")
         if quantity <= 0:
-            errors.append("Quantity must be greater than zero.")
+            errors.append("مقدار باید بزرگتر از صفر باشد.")
         elif quantity % self.purchase_step != 0:
-            errors.append(f"Quantity must be a multiple of {self.purchase_step.normalize()}.")
+            errors.append(f"مقدار باید مضربی از {self.purchase_step.normalize()} باشد.")
         if quantity < self.min_purchase or quantity > self.max_purchase:
             errors.append(
-                f"Quantity must be between {self.min_purchase.normalize()} and {self.max_purchase.normalize()}."
+                f"مقدار باید بین {self.min_purchase.normalize()} و {self.max_purchase.normalize()} باشد."
             )
         if quantity > self.available_quantity:
-            errors.append("Insufficient stock.")
+            errors.append("موجودی کافی نیست.")
         return errors
 
     def clamp_quantity(self, quantity: Decimal) -> Decimal | None:
@@ -156,7 +156,7 @@ class ProductVariant(models.Model):
             if self.pk is not None:
                 siblings = siblings.exclude(pk=self.pk)
             if siblings.exists():
-                raise ValidationError({"attributes": "Another variant of this product has the same combination."})
+                raise ValidationError({"attributes": "تنوع دیگری از این محصول همین ترکیب را دارد."})
             self.combination_hash = combination_hash
             self.save()
             self.attributes.all().delete()
@@ -182,7 +182,7 @@ class ProductVariant(models.Model):
             variant = cls.objects.select_for_update().get(pk=variant_id)
             new_quantity = quantity if quantity is not None else variant.stock_quantity + delta
             if new_quantity < 0:
-                raise ValidationError({"stock_quantity": "Stock cannot be negative."})
+                raise ValidationError({"stock_quantity": "موجودی نمی‌تواند منفی باشد."})
             if new_quantity < variant.reserved_quantity and not allow_below_reserved:
                 raise StockBelowReserved(variant, new_quantity)
             variant.stock_quantity = new_quantity

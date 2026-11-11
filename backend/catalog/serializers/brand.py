@@ -21,7 +21,7 @@ class BrandSerializer(ModelCleanSerializer):
             return logo
         if self.instance is not None and logo.brand_id == self.instance.pk:
             return logo
-        raise serializers.ValidationError("The logo must be a new upload or this brand's current logo.")
+        raise serializers.ValidationError("لوگو باید آپلود جدید یا لوگوی فعلی همین برند باشد.")
 
     def create(self, validated_data: dict) -> Brand:
         logo = validated_data.pop("logo", None)

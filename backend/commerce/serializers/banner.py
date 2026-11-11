@@ -12,7 +12,7 @@ class PublicBannerSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Banner
-        fields = ["id", "title", "image_url", "link_url", "position", "sort_order"]
+        fields = ["id", "title", "subtitle", "image_url", "link_url", "position", "sort_order"]
         read_only_fields = fields
 
 
@@ -25,7 +25,7 @@ class BannerSerializer(ModelCleanSerializer):
     class Meta:
         model = Banner
         fields = [
-            "id", "title", "image", "image_url", "link_url", "position", "start_at", "end_at", "is_active",
+            "id", "title", "subtitle", "image", "image_url", "link_url", "position", "start_at", "end_at", "is_active",
             "sort_order",
         ]
 
@@ -40,7 +40,7 @@ class BannerSerializer(ModelCleanSerializer):
             return image
         if self.instance is not None and image.banner_id == self.instance.pk:
             return image
-        raise serializers.ValidationError("The image must be a new upload or this banner's current image.")
+        raise serializers.ValidationError("تصویر باید آپلود جدید یا تصویر فعلی همین بنر باشد.")
 
     def create(self, validated_data: dict) -> Banner:
         with transaction.atomic():

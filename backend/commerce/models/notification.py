@@ -1,5 +1,5 @@
 from django.conf import settings
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 
 from commerce.models.order import InvalidTransition
@@ -46,9 +46,38 @@ class Notification(models.Model):
         ordering = ["-created_at", "-id"]
         indexes = [models.Index(fields=["user", "status", "-created_at"], name="notification_inbox_idx")]
 
+    @classmethod
+    def notify(
+        cls,
+        user: object,
+        type: str,
+        title: str,
+        body: str,
+        *,
+        related: tuple[str, int] | None = None,
+        sms: tuple[str, list[str]] | None = None,
+    ) -> "Notification":
+        """Create the in-app notification (always) and, when ``StoreSettings.sms_notifications_enabled`` and an
+        ``sms`` (template, tokens) is given, an SMS record sent after the surrounding transaction commits.
+        """
+        from commerce.models import StoreSettings
+        from commerce.tasks import send_sms_task
+
+        related_type, related_id = related or (None, None)
+        common = {"user": user, "type": type, "title": title, "body": body, "related_object_type": related_type,
+                  "related_object_id": related_id}
+        notification = cls.objects.create(channel=cls.Channel.IN_APP, **common)
+        if sms is not None and StoreSettings.get_solo().sms_notifications_enabled:
+            template, tokens = sms
+            # The SMS record is the admin's delivery log; customers only see in-app notifications.
+            cls.objects.create(channel=cls.Channel.SMS, status=cls.Status.READ, **common)
+            mobile = user.get_username()
+            transaction.on_commit(lambda: send_sms_task.delay(mobile, template, tokens))
+        return notification
+
     def set_status(self, status: str) -> None:
         if self.STATUS_ORDER.index(status) < self.STATUS_ORDER.index(self.status):
-            raise InvalidTransition(f"A notification cannot move from {self.status} back to {status}.")
+            raise InvalidTransition(f"وضعیت اعلان از {self.status} به {status} قابل بازگشت نیست.")
         if self.read_at is None and status != self.Status.NEW:
             self.read_at = timezone.now()
         self.status = status

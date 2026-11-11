@@ -24,6 +24,7 @@ from commerce.models import (
     OrderAddressSnapshot,
     OrderItem,
     ShippingMethod,
+    StoreSettings,
 )
 from commerce.services.cart import line_variants
 
@@ -170,7 +171,7 @@ def _place(
         cart = Cart.active_for(user, lock=True)
         quantities = {item.variant_id: item.quantity for item in cart.items.all()}
         if not quantities:
-            raise CheckoutRejected({"cart": ["Your cart is empty."]})
+            raise CheckoutRejected({"cart": ["سبد خرید شما خالی است."]})
     else:
         quantities = lines
 
@@ -190,10 +191,10 @@ def _place(
     # 4. Address (own, not deleted) and a shipping method serving its city.
     address = Address.objects.active().select_related("province", "city").filter(pk=address_id, user=user).first()
     if address is None:
-        raise ValidationError({"address": "Select one of your addresses."})
+        raise ValidationError({"address": "یکی از آدرس‌های خود را انتخاب کنید."})
     shipping = ShippingMethod.available_for(address.city_id).filter(pk=shipping_method_id).first()
     if shipping is None:
-        raise ValidationError({"shipping_method": "This shipping method is not available for the selected city."})
+        raise ValidationError({"shipping_method": "این روش ارسال برای شهر انتخاب‌شده در دسترس نیست."})
 
     # 5. Discount code, locked so usage limits hold under concurrency.
     code = None
@@ -201,7 +202,7 @@ def _place(
     if discount_code:
         code = DiscountCode.objects.select_for_update().filter(code__iexact=discount_code).first()
         if code is None:
-            raise ValidationError({"discount_code": "Unknown discount code."})
+            raise ValidationError({"discount_code": "کد تخفیف نامعتبر است."})
         discount_amount, shipping_discount = code.evaluate(
             user, [(item.product, item.line_total) for item in items], shipping.price
         )
@@ -219,9 +220,8 @@ def _place(
     order.shipping_method_name_snapshot = shipping.name
     order.shipping_cost = shipping.price
     order.shipping_discount_amount = shipping_discount
-    order.payable_total = (
-        order.subtotal_products - discount_amount + order.shipping_cost - shipping_discount + order.other_costs
-    )
+    store = StoreSettings.get_solo()
+    order.set_totals(store.packaging_fee, store.tax_percentage)
 
     # 7. Reserve stock (variants are already locked) and consume the code.
     for item in items:
@@ -236,3 +236,30 @@ def _place(
         cart.items.all().delete()
     return order
 
+
+
+def quote_order(user: User, items: list[OrderItem], shipping_method_id: int | None, discount_code: str) -> Order:
+    """Unsaved order with the totals confirmation would charge for priced cart ``items`` (never changes state).
+
+    The shipping method is checked when given (its city rule is checked at confirmation); an invalid discount code
+    raises ``ValidationError`` like confirmation does.
+    """
+    order = Order(user=user)
+    order.subtotal_products = sum((item.line_total for item in items), Decimal("0"))
+    order.product_discount_total = sum((item.line_product_discount_total for item in items), Decimal("0"))
+    if shipping_method_id is not None:
+        shipping = ShippingMethod.objects.filter(pk=shipping_method_id, is_active=True).first()
+        if shipping is None:
+            raise ValidationError({"shipping_method": "روش ارسال نامعتبر است."})
+        order.shipping_cost = shipping.price
+    if discount_code:
+        code = DiscountCode.objects.filter(code__iexact=discount_code).first()
+        if code is None:
+            raise ValidationError({"discount_code": "کد تخفیف نامعتبر است."})
+        order.discount_amount, order.shipping_discount_amount = code.evaluate(
+            user, [(item.product, item.line_total) for item in items], order.shipping_cost
+        )
+        order.discount_code_snapshot = code.code
+    store = StoreSettings.get_solo()
+    order.set_totals(store.packaging_fee, store.tax_percentage)
+    return order

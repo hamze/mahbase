@@ -4,6 +4,7 @@ from django.db import models, transaction
 from django.db.models import F, Q
 from django.utils import timezone
 
+from accounts.services.sms.templates import SmsTemplate
 from catalog.models.product_variant import PRICE
 from commerce.models.order import InvalidTransition
 
@@ -64,7 +65,7 @@ class OrderRefund(models.Model):
 
     def _move(self, allowed_from: set[str], new_status: str) -> None:
         if self.status not in allowed_from:
-            raise InvalidTransition(f"Refund cannot change from {self.status} to {new_status}.")
+            raise InvalidTransition(f"وضعیت بازگشت وجه از {self.status} به {new_status} قابل تغییر نیست.")
         self.status = new_status
 
     def approve(self, admin: User) -> None:
@@ -114,6 +115,7 @@ class OrderRefund(models.Model):
                 order.items.update(restocked_at=self.completed_at)
             elif self.reason == self.Reason.RETURN:
                 self.return_request.apply_completed_refund(order, self.completed_at)
+            order.notify("مبلغ سفارش شما بازگردانده شد", SmsTemplate.ORDER_REFUNDED)
             if fully_refunded and order.discount_code_id and order.discount_code.release_on_refund:
                 order.release_coupon()
             order.save()

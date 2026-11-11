@@ -66,7 +66,7 @@ class DiscountValidateView(APIView):
         serializer.is_valid(raise_exception=True)
         code = DiscountCode.objects.filter(code__iexact=serializer.validated_data["code"]).first()
         if code is None:
-            raise ValidationError({"code": "Unknown discount code."})
+            raise ValidationError({"code": "کد تخفیف نامعتبر است."})
         shipping_cost = Decimal("0")
         if shipping_id := serializer.validated_data.get("shipping_method"):
             shipping_cost = get_object_or_404(ShippingMethod, pk=shipping_id, is_active=True).price

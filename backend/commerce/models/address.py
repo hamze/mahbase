@@ -54,9 +54,9 @@ class Address(models.Model):
     def clean(self) -> None:
         errors = {}
         if self.city_id and self.province_id and self.city.province_id != self.province_id:
-            errors["city"] = "The city does not belong to the selected province."
+            errors["city"] = "شهر انتخاب‌شده متعلق به استان انتخاب‌شده نیست."
         if (self.latitude is None) != (self.longitude is None):
-            errors["latitude"] = "Latitude and longitude must be given together."
+            errors["latitude"] = "عرض و طول جغرافیایی باید با هم وارد شوند."
         if errors:
             raise ValidationError(errors)
 

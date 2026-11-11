@@ -19,7 +19,7 @@ def normalize_mobile(value: str) -> str:
     if len(digits) == 10 and digits.startswith("9"):
         digits = "0" + digits
     if not MOBILE_PATTERN.match(digits):
-        raise ValidationError("Enter a valid mobile number (09xxxxxxxxx).")
+        raise ValidationError("شماره موبایل معتبر وارد کنید (09xxxxxxxxx).")
     return digits
 
 
@@ -84,6 +84,22 @@ class UserProfile(models.Model):
             user.save()
             cls.objects.create(user=user, customer_tier=customer_tier, created_source=source)
         return user
+
+    @staticmethod
+    def validate_new_mobile(user: User, mobile: str) -> None:
+        if mobile == user.get_username():
+            raise ValidationError({"new_mobile": "این شماره هم‌اکنون شماره موبایل شماست."})
+        if User.objects.filter(username=mobile).exists():
+            raise ValidationError({"new_mobile": "این شماره موبایل متعلق به حساب دیگری است."})
+
+    @classmethod
+    def change_mobile(cls, user: User, mobile: str) -> None:
+        """Make ``mobile`` the login (``username``); both numbers were already verified by the caller."""
+        with transaction.atomic():
+            user = User.objects.select_for_update().get(pk=user.pk)
+            cls.validate_new_mobile(user, mobile)
+            user.username = mobile
+            user.save(update_fields=["username"])
 
     def block(self) -> None:
         self._set_state(self.AccountStatus.BLOCKED, is_active=False)

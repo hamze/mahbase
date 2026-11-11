@@ -38,13 +38,13 @@ class BlogCategory(models.Model):
         if self.parent_id is None:
             return
         if self.parent_id == self.pk:
-            raise ValidationError({"parent": "A category cannot be its own parent."})
+            raise ValidationError({"parent": "دسته‌بندی نمی‌تواند والد خودش باشد."})
         if self.parent.parent_id is not None:
-            raise ValidationError({"parent": "Blog categories are limited to two levels."})
+            raise ValidationError({"parent": "دسته‌بندی‌های وبلاگ حداکثر دو سطح دارند."})
         if self.pk and self.children.exists():
-            raise ValidationError({"parent": "A category with subcategories cannot become a subcategory."})
+            raise ValidationError({"parent": "دسته‌بندی دارای زیردسته نمی‌تواند زیردسته شود."})
 
     def delete(self, *args, **kwargs) -> tuple[int, dict[str, int]]:
         if self.posts.exists() or self.children.exists():
-            raise ValidationError("A blog category with posts or subcategories cannot be deleted.")
+            raise ValidationError("دسته‌بندی وبلاگ دارای نوشته یا زیردسته قابل حذف نیست.")
         return super().delete(*args, **kwargs)

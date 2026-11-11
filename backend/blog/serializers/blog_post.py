@@ -57,7 +57,7 @@ class BlogPostSerializer(serializers.ModelSerializer):
             return cover
         if self.instance is not None and cover.blog_post_id == self.instance.pk:
             return cover
-        raise serializers.ValidationError("The cover must be a new upload or this post's current cover.")
+        raise serializers.ValidationError("تصویر کاور باید آپلود جدید یا کاور فعلی همین نوشته باشد.")
 
     def create(self, validated_data: dict) -> BlogPost:
         tags = validated_data.pop("tags", [])

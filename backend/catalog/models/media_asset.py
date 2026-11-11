@@ -122,12 +122,12 @@ class MediaAsset(models.Model):
         """``owners`` maps owner field names to ids (missing names count as unset)."""
         set_owners = [name for name in OWNER_FIELDS if owners.get(name) is not None]
         if image_type == cls.ImageType.TEMPORARY:
-            return "Temporary media cannot have an owner." if set_owners else None
+            return "رسانه موقت نمی‌تواند مالک داشته باشد." if set_owners else None
         if len(set_owners) != 1:
-            return "Active media must have exactly one owner."
+            return "رسانه فعال باید دقیقا یک مالک داشته باشد."
         required = cls.OWNER_OF_TYPE.get(image_type)
         if set_owners[0] != required:
-            return f"Image type '{image_type}' can only belong to a {required}."
+            return f"تصویر از نوع «{image_type}» فقط می‌تواند متعلق به {required} باشد."
         return None
 
     def clean(self) -> None:
@@ -139,7 +139,7 @@ class MediaAsset(models.Model):
     def convert_upload(upload: UploadedFile) -> ContentFile:
         """Verify the real image format and dimensions and re-encode the upload as WebP."""
         if upload.size > settings.MEDIA_MAX_UPLOAD_BYTES:
-            raise ValidationError({"file": f"File exceeds {settings.MEDIA_MAX_UPLOAD_BYTES} bytes."})
+            raise ValidationError({"file": f"حجم فایل بیش از {settings.MEDIA_MAX_UPLOAD_BYTES} بایت است."})
         try:
             image = Image.open(upload)
             image.verify()
@@ -147,9 +147,9 @@ class MediaAsset(models.Model):
             image = Image.open(upload)
             image.load()
         except (UnidentifiedImageError, OSError, SyntaxError):
-            raise ValidationError({"file": "The file is not a valid image."})
+            raise ValidationError({"file": "فایل یک تصویر معتبر نیست."})
         if image.format not in ALLOWED_IMAGE_FORMATS:
-            raise ValidationError({"file": f"Image format '{image.format}' is not allowed."})
+            raise ValidationError({"file": f"فرمت تصویر «{image.format}» مجاز نیست."})
         width, height = image.size
         if min(width, height) < settings.MEDIA_MIN_DIMENSION or max(width, height) > settings.MEDIA_MAX_DIMENSION:
             raise ValidationError({
@@ -177,7 +177,7 @@ class MediaAsset(models.Model):
         }
         missing = sorted(set(ids) - set(assets))
         if missing:
-            raise ValidationError({"media": f"Media assets {missing} are not available temporary uploads."})
+            raise ValidationError({"media": f"رسانه‌های {missing} آپلود موقت در دسترس نیستند."})
         for position, (asset_id, image_type) in enumerate(items):
             asset = assets[asset_id]
             asset.image_type = image_type

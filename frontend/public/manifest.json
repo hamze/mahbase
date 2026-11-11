@@ -1,0 +1,19 @@
+{
+  "name": "گوشت‌خانه | فروشگاه آنلاین گوشت تازه",
+  "short_name": "گوشت‌خانه",
+  "description": "خرید تازه‌ترین گوشت‌ها با تحویل سریع",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FCFAF7",
+  "theme_color": "#9E2A2B",
+  "lang": "fa",
+  "dir": "rtl",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -111,6 +111,22 @@ class OrderCreateSerializer(serializers.Serializer):
     discount_code = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")
 
 
+class OrderQuoteRequestSerializer(serializers.Serializer):
+    shipping_method = serializers.IntegerField(required=False, allow_null=True, default=None)
+    discount_code = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")
+
+
+class OrderQuoteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Order
+        fields = [
+            "subtotal_products", "product_discount_total", "discount_code_snapshot", "discount_amount",
+            "shipping_cost", "shipping_discount_amount", "packaging_fee", "tax_percentage", "tax_amount",
+            "payable_total",
+        ]
+        read_only_fields = fields
+
+
 class ReturnLineSerializer(serializers.Serializer):
     order_item = serializers.IntegerField()
     quantity = serializers.DecimalField(**QUANTITY)
@@ -119,12 +135,3 @@ class ReturnLineSerializer(serializers.Serializer):
 class ReturnRequestCreateSerializer(serializers.Serializer):
     reason = serializers.CharField()
     items = ReturnLineSerializer(many=True)
-
-
-class PaymentCallbackSerializer(serializers.Serializer):
-    order_number = serializers.CharField(max_length=20)
-    idempotency_key = serializers.CharField(max_length=100)
-    gateway_transaction_id = serializers.CharField(max_length=100, required=False, allow_null=True, default=None)
-    amount = serializers.DecimalField(max_digits=18, decimal_places=2)
-    status = serializers.ChoiceField(choices=["SUCCESS", "FAILED"])
-    method = serializers.CharField(max_length=30, required=False, allow_blank=True, default="")

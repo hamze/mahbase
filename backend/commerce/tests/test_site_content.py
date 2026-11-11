@@ -8,11 +8,11 @@ from rest_framework.test import APIClient
 from catalog.models import MediaAsset
 from catalog.tests.helpers import make_staff, png_upload
 from commerce.models import Banner, Notification, Order, StoreSettings
-from commerce.tests.helpers import GATEWAY_SECRET, ShopFixture
+from commerce.tests.helpers import FAKE_GATEWAY, ShopFixture
 from commerce.tests.test_order_workflows import checkout
 
 
-@override_settings(PAYMENT_GATEWAY_SECRET=GATEWAY_SECRET)
+@override_settings(PAYMENT_GATEWAY=FAKE_GATEWAY)
 class ReviewTests(TestCase):
     def setUp(self) -> None:
         self.shop = ShopFixture()

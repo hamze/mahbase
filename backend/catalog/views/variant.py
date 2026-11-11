@@ -1,7 +1,7 @@
 import logging
 
 from django.db import transaction
-from rest_framework import status, viewsets
+from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -13,6 +13,7 @@ from catalog.serializers import (
     ProductVariantSerializer,
     StockUpdateSerializer,
 )
+from config.api import Responses
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,8 @@ class VariantViewSet(viewsets.GenericViewSet):
                     allow_below_reserved=data["confirm"],
                 )
             except StockBelowReserved as exc:
-                return Response(
+                return Responses.get_response(
+                    Responses.CATALOG.STOCK_BELOW_RESERVED,
                     {
                         "warning": "stock_below_reserved",
                         "requested": exc.requested,
@@ -61,7 +63,6 @@ class VariantViewSet(viewsets.GenericViewSet):
                         "affected_orders": Order.reserved_on_variant(variant.pk),
                         "action_required": "confirm",
                     },
-                    status=status.HTTP_409_CONFLICT,
                 )
             if variant.available_quantity < 0:
                 affected = Order.invalidate_reserved_on_variant(variant.pk)

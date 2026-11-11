@@ -19,7 +19,7 @@ class FAQCategoryListView(generics.ListAPIView):
 
 
 class FAQListView(generics.ListAPIView):
-    """``GET /api/faqs/?category=`` (public, active only)."""
+    """``GET /api/faqs/?category=&home=true`` (public, active only); ``home=true`` lists the home page block."""
 
     permission_classes = [AllowAny]
     serializer_class = FAQSerializer
@@ -29,6 +29,8 @@ class FAQListView(generics.ListAPIView):
         faqs = FAQ.objects.filter(is_active=True, category__is_active=True)
         if category := self.request.query_params.get("category"):
             faqs = faqs.filter(category_id=category)
+        if self.request.query_params.get("home") == "true":
+            faqs = faqs.filter(show_on_home=True).order_by("home_sort_order", "id")
         return faqs
 
 

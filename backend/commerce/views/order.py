@@ -1,3 +1,5 @@
+import logging
+
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -14,13 +16,24 @@ from commerce.models import Order, OrderItem, ReturnRequest
 from commerce.serializers import (
     OrderCreateSerializer,
     OrderListSerializer,
-    OrderRefundSerializer,
+    OrderQuoteRequestSerializer,
+    OrderQuoteSerializer,
     OrderSerializer,
     ReturnRequestCreateSerializer,
     ReturnRequestSerializer,
 )
-from commerce.services.checkout import CheckoutRejected, IdempotencyKeyReused, place_order, request_fingerprint
-from commerce.services.payment_gateway.provider import get_payment_gateway
+from commerce.services.cart import priced_lines
+from commerce.services.checkout import (
+    CheckoutRejected,
+    IdempotencyKeyReused,
+    place_order,
+    quote_order,
+    request_fingerprint,
+)
+from commerce.services.payments import start_payment
+from config.api import Responses
+
+logger = logging.getLogger(__name__)
 
 
 def order_detail_queryset() -> QuerySet:
@@ -29,16 +42,24 @@ def order_detail_queryset() -> QuerySet:
     )
 
 
+def payment_link(order: Order) -> str | None:
+    """A new bank link for the order, or None when the bank request fails (logged)."""
+    try:
+        return start_payment(order)
+    except Exception as e:
+        logger.error(f"Payment request for order {order.order_number} failed: {str(e)}", exc_info=True)
+        return None
+
+
 def idempotency_key_reused_response() -> Response:
-    return Response(
-        {"detail": "This Idempotency-Key was already used for a different request."}, status=status.HTTP_409_CONFLICT
-    )
+    return Responses.get_response(Responses.GENERAL.IDEMPOTENCY_KEY_REUSED)
 
 
 class OrderCreateView(APIView):
     """``POST /api/orders/`` with an ``Idempotency-Key`` header — final confirmation that reserves stock.
 
-    201 with the new order and ``payment_redirect_url``; 200 with the same order for a repeated key and body;
+    201 with the new order and ``payment_redirect_url`` (a fresh bank link, null while the bank is unreachable: the
+    customer retries with ``/pay/``); 200 with the same order for a repeated key and body;
     409 for a repeated key with a different body; 422 with per-line errors when any line fails (nothing is reserved and the cart is unchanged).
     """
 
@@ -47,7 +68,7 @@ class OrderCreateView(APIView):
     def post(self, request: Request) -> Response:
         idempotency_key = request.headers.get("Idempotency-Key", "").strip()
         if not idempotency_key or len(idempotency_key) > 64:
-            return Response({"detail": "An Idempotency-Key header (max 64 characters) is required."}, status=status.HTTP_400_BAD_REQUEST)
+            return Responses.get_response(Responses.GENERAL.IDEMPOTENCY_KEY_REQUIRED)
         serializer = OrderCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
@@ -61,22 +82,38 @@ class OrderCreateView(APIView):
                 request_fingerprint(request.data),
             )
         except CheckoutRejected as exc:
-            return Response(exc.errors, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+            return Responses.get_response(Responses.ORDER.ITEMS_REJECTED, exc.errors)
         except IdempotencyKeyReused:
             return idempotency_key_reused_response()
+        payment_redirect_url = payment_link(order)
         order = order_detail_queryset().get(pk=order.pk)
         return Response(
             {
                 "order_number": order.order_number,
-                "payment_redirect_url": get_payment_gateway().payment_url(order),
+                "payment_redirect_url": payment_redirect_url,
                 "order": OrderSerializer(order).data,
             },
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
 
 
+class OrderQuoteView(APIView):
+    """``POST /api/orders/quote/`` — the totals of the current cart for a shipping method and discount code, with
+    packaging and tax, exactly as confirmation computes them (checkout summary). Never changes state.
+    """
+
+    permission_classes = [IsCustomer]
+
+    def post(self, request: Request) -> Response:
+        serializer = OrderQuoteRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        order = quote_order(request.user, priced_lines(request), data["shipping_method"], data["discount_code"])
+        return Response(OrderQuoteSerializer(order).data)
+
+
 class MyOrderViewSet(viewsets.ReadOnlyModelViewSet):
-    """``/api/me/orders/`` — own orders by order number, plus refund (cancel before shipping) and return requests."""
+    """``/api/me/orders/`` — own orders by order number, payment retry and return requests. Cancelling is admin-only."""
 
     permission_classes = [IsCustomer]
     lookup_field = "order_number"
@@ -92,22 +129,22 @@ class MyOrderViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="pay")
     def pay(self, request: Request, order_number: str) -> Response:
-        """Payment link for an unpaid order that still holds its reservation (also after a failed attempt)."""
+        """Bank link for an unpaid order that still holds its reservation (also after a failed or abandoned attempt).
+
+        502 while the bank is unreachable.
+        """
         with transaction.atomic():
             order = self._locked_order(order_number)
             if order.stock_reservation_status != Order.ReservationStatus.RESERVED or order.payment_status not in (
-                Order.PaymentStatus.UNPAID, Order.PaymentStatus.FAILED
+                Order.PaymentStatus.UNPAID, Order.PaymentStatus.PENDING, Order.PaymentStatus.FAILED
             ):
-                return Response({"detail": "This order cannot be paid."}, status=status.HTTP_409_CONFLICT)
+                return Responses.get_response(Responses.ORDER.NOT_PAYABLE)
             order.payment_status = Order.PaymentStatus.PENDING
             order.save(update_fields=["payment_status", "updated_at"])
-        return Response({"payment_redirect_url": get_payment_gateway().payment_url(order)})
-
-    @action(detail=True, methods=["post"], url_path="refund-request")
-    def refund_request(self, request: Request, order_number: str) -> Response:
-        with transaction.atomic():
-            refund = self._locked_order(order_number).request_cancellation_refund(request.user)
-        return Response(OrderRefundSerializer(refund).data, status=status.HTTP_201_CREATED)
+        url = payment_link(order)
+        if url is None:
+            return Responses.get_response(Responses.ORDER.GATEWAY_ERROR)
+        return Response({"payment_redirect_url": url})
 
     @action(detail=True, methods=["post"], url_path="return-request")
     def return_request(self, request: Request, order_number: str) -> Response:
@@ -123,6 +160,6 @@ def open_return(order: Order, data: dict, requested_by: User) -> ReturnRequest:
     """Shared by customer and admin return requests (order locked by caller); ``ReturnRequest.open`` validates."""
     order_items = OrderItem.objects.in_bulk([line["order_item"] for line in data["items"]])
     if len(order_items) != len({line["order_item"] for line in data["items"]}):
-        raise ValidationError({"items": "Unknown order item."})
+        raise ValidationError({"items": "قلم سفارش نامعتبر است."})
     lines = [(order_items[line["order_item"]], line["quantity"]) for line in data["items"]]
     return ReturnRequest.open(order, data["reason"], lines, requested_by)

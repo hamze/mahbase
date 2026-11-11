@@ -1,17 +1,16 @@
-import hashlib
-import hmac
-import json
+from dataclasses import dataclass
 from decimal import Decimal
 
 from django.contrib.auth.models import User
-from django.test import Client
 
 from accounts.models import UserProfile
 from catalog.models import Product, ProductVariant
 from catalog.tests.helpers import CatalogFixture
-from commerce.models import Address, Cart, City, Province, ShippingMethod
+from commerce.models import Address, Cart, City, Order, Province, ShippingMethod
+from commerce.services.payment_gateway.interface import PaymentRequest, PaymentVerification
+from commerce.services.payments import DuplicateGatewayTransaction, handle_callback
 
-GATEWAY_SECRET = "test-secret"
+FAKE_GATEWAY = "commerce.tests.helpers.FakeBankGateway"
 
 
 class ShopFixture:
@@ -41,9 +40,42 @@ class ShopFixture:
         return {"address": address.pk, "shipping_method": self.shipping.pk, **extra}
 
 
-def post_callback(client: Client, payload: dict) -> object:
-    body = json.dumps(payload)
-    signature = hmac.new(GATEWAY_SECRET.encode(), body.encode(), hashlib.sha256).hexdigest()
-    return client.generic(
-        "POST", "/api/payments/callback/", body, content_type="application/json", HTTP_X_GATEWAY_SIGNATURE=signature
-    )
+class FakeBankGateway:
+    """Test bank: every request gets authority ``AUTH-<order number>-<n>``; ``verified`` decides verification."""
+
+    name = "fake"
+    verified: dict[str, PaymentVerification] = {}
+    requests = 0
+
+    def request_payment(self, order: Order, callback_url: str) -> PaymentRequest:
+        FakeBankGateway.requests += 1
+        authority = f"AUTH-{order.order_number}-{FakeBankGateway.requests}"
+        return PaymentRequest(authority, f"https://bank.test/pay/{authority}")
+
+    def verify(self, authority: str, amount: Decimal) -> PaymentVerification:
+        return self.verified.get(authority, PaymentVerification(False, None, amount, ""))
+
+    def refund(self, refund: object) -> str:
+        return f"fake-refund-{refund.pk}"
+
+
+@dataclass
+class CallbackResult:
+    status_code: int
+    data: dict
+
+    def json(self) -> dict:
+        return self.data
+
+
+def post_callback(payload: dict) -> CallbackResult:
+    """Apply a bank result through ``handle_callback`` (the payment-result rules), as the return view does."""
+    try:
+        payment = handle_callback(
+            order_number=payload["order_number"], idempotency_key=payload["idempotency_key"], gateway="fake",
+            gateway_transaction_id=payload.get("gateway_transaction_id"), amount=Decimal(payload["amount"]),
+            succeeded=payload["status"] == "SUCCESS", method="online", raw_response={},
+        )
+    except DuplicateGatewayTransaction:
+        return CallbackResult(409, {})
+    return CallbackResult(200, {"result": payment.status})

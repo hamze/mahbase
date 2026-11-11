@@ -49,7 +49,7 @@ class AccessUserViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     def toggle_active(self, request: Request, pk: str) -> Response:
         user = self.get_object()
         if user.is_superuser and not request.user.is_superuser:
-            raise PermissionDenied("Only a superuser can change a superuser's activation.")
+            raise PermissionDenied("فقط مدیر ارشد می‌تواند وضعیت فعال بودن مدیر ارشد را تغییر دهد.")
         user.is_active = not user.is_active
         user.save(update_fields=["is_active"])
         logger.info(f"User {request.user.pk} set is_active={user.is_active} on user {user.pk}")

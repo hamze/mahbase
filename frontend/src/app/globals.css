@@ -1,0 +1,110 @@
+@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800;900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 30 33% 99%;
+    --foreground: 0 0% 10%;
+    --card: 30 22% 95%;
+    --card-foreground: 0 0% 10%;
+    --popover: 30 33% 99%;
+    --popover-foreground: 0 0% 10%;
+    --primary: 359 58% 39%;
+    --primary-foreground: 30 33% 99%;
+    --secondary: 125 7% 33%;
+    --secondary-foreground: 30 33% 99%;
+    --muted: 30 16% 94%;
+    --muted-foreground: 30 5% 40%;
+    --accent: 30 22% 92%;
+    --accent-foreground: 0 0% 10%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 30 33% 99%;
+    --success: 142 45% 36%;
+    --success-foreground: 30 33% 99%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 10%;
+    --info: 210 80% 48%;
+    --info-foreground: 30 33% 99%;
+    --border: 30 16% 89%;
+    --input: 30 16% 89%;
+    --ring: 359 58% 39%;
+    --radius: 0.625rem;
+    --font-heading: 'Vazirmatn', ui-sans-serif, system-ui, sans-serif;
+    --font-body: 'Vazirmatn', ui-sans-serif, system-ui, sans-serif;
+    --font-display: 'Vazirmatn', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  .dark {
+    --background: 20 14% 8%;
+    --foreground: 30 22% 95%;
+    --card: 20 12% 12%;
+    --card-foreground: 30 22% 95%;
+    --popover: 20 14% 10%;
+    --popover-foreground: 30 22% 95%;
+    --primary: 359 55% 52%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 125 10% 45%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 20 10% 18%;
+    --muted-foreground: 30 10% 65%;
+    --accent: 20 10% 20%;
+    --accent-foreground: 30 22% 95%;
+    --destructive: 0 70% 55%;
+    --destructive-foreground: 30 33% 99%;
+    --success: 142 40% 48%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 90% 58%;
+    --warning-foreground: 20 14% 8%;
+    --info: 210 75% 60%;
+    --info-foreground: 0 0% 100%;
+    --border: 20 10% 22%;
+    --input: 20 10% 22%;
+    --ring: 359 55% 52%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground font-body;
+    font-feature-settings: "ss01";
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  .price-odometer {
+    transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  @keyframes marquee {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+  }
+  .marquee-track {
+    display: flex;
+    width: max-content;
+    animation: marquee 30s linear infinite;
+  }
+  .marquee-paused:hover .marquee-track {
+    animation-play-state: paused;
+  }
+  .marquee-reverse .marquee-track {
+    animation-direction: reverse;
+  }
+  .marquee-fast .marquee-track {
+    animation-duration: 20s;
+  }
+}

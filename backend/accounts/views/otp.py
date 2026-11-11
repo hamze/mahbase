@@ -9,22 +9,34 @@ from rest_framework.views import APIView
 
 from accounts.models import OTPCode, UserProfile
 from accounts.serializers import MobileSerializer, OTPVerifySerializer
-from accounts.services.sms.provider import get_sms_sender
+from accounts.services.otp_delivery import SmsDeliveryFailed, send_code
+from accounts.throttles import OTPIPThrottle
 from accounts.tokens import PermissionRefreshToken
+from config.api import Responses
+
+
+def code_sent_response(mobile: str, purpose: str) -> Response:
+    """Send a code; 202 with its lifetime and the resend wait, 502 when the SMS provider failed."""
+    try:
+        send_code(mobile, purpose)
+    except SmsDeliveryFailed:
+        return Responses.get_response(Responses.ACCOUNT_GENERAL.SMS_SEND_FAILED)
+    return Response(
+        {"expires_in": settings.OTP_TTL_SECONDS, "resend_in": settings.OTP_RESEND_SECONDS},
+        status=status.HTTP_202_ACCEPTED,
+    )
 
 
 class OTPRequestView(APIView):
     """``POST /api/auth/otp/request/`` — send a login code to a mobile (customers sign up on first verify)."""
 
     permission_classes = [AllowAny]
+    throttle_classes = [OTPIPThrottle]
 
     def post(self, request: Request) -> Response:
         serializer = MobileSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        mobile = serializer.validated_data["mobile"]
-        code = OTPCode.issue(mobile, OTPCode.Purpose.LOGIN)
-        get_sms_sender().send(mobile, f"Login code: {code}")
-        return Response({"expires_in": settings.OTP_TTL_SECONDS}, status=status.HTTP_202_ACCEPTED)
+        return code_sent_response(serializer.validated_data["mobile"], OTPCode.Purpose.LOGIN)
 
 
 class OTPVerifyView(APIView):
@@ -40,12 +52,12 @@ class OTPVerifyView(APIView):
         serializer.is_valid(raise_exception=True)
         mobile, code = serializer.validated_data["mobile"], serializer.validated_data["code"]
         if not OTPCode.verify(mobile, OTPCode.Purpose.LOGIN, code):
-            return Response({"code": ["Invalid or expired code."]}, status=status.HTTP_400_BAD_REQUEST)
+            return Responses.get_response(Responses.ACCOUNT_GENERAL.INVALID_OTP)
         user = User.objects.filter(username=mobile).first()
         if user is None:
             user = UserProfile.create_customer(mobile, UserProfile.CreatedSource.SELF_SIGNUP)
         if not user.is_active:
-            return Response({"detail": "This account is inactive."}, status=status.HTTP_403_FORBIDDEN)
+            return Responses.get_response(Responses.ACCOUNT_GENERAL.DISABLED)
         refresh = PermissionRefreshToken.for_user(user)
         user_logged_in.send(sender=User, request=request._request, user=user)
         return Response({"access": str(refresh.access_token), "refresh": str(refresh)})

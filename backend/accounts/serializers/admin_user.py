@@ -25,7 +25,7 @@ class AdminUserSerializer(serializers.ModelSerializer):
     def validate_mobile(self, value: str) -> str:
         mobile = normalize_mobile(value)
         if User.objects.filter(username=mobile).exclude(pk=getattr(self.instance, "pk", None)).exists():
-            raise serializers.ValidationError("A user with this mobile already exists.")
+            raise serializers.ValidationError("کاربری با این شماره موبایل وجود دارد.")
         return mobile
 
     def create(self, validated_data: dict) -> User:

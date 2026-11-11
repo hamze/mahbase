@@ -33,4 +33,4 @@ class ShippingMethod(models.Model):
     @staticmethod
     def validate_cities(applies_to_all_cities: bool, city_ids: list[int]) -> None:
         if not applies_to_all_cities and not city_ids:
-            raise ValidationError({"cities": "Select at least one city or apply the method to all cities."})
+            raise ValidationError({"cities": "حداقل یک شهر انتخاب کنید یا روش را برای همه شهرها فعال کنید."})

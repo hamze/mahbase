@@ -1,3 +1,4 @@
+from django.conf import settings
 import logging
 
 from django.contrib.auth.models import User
@@ -32,9 +33,9 @@ from commerce.services.checkout import (
     place_admin_order,
     request_fingerprint,
 )
-from commerce.services.payment_gateway.provider import get_payment_gateway
 from commerce.views.base import AdminPermissionMixin
 from commerce.views.order import idempotency_key_reused_response, open_return, order_detail_queryset
+from config.api import Responses
 
 logger = logging.getLogger(__name__)
 
@@ -90,10 +91,7 @@ class AdminOrderViewSet(AdminPermissionMixin, viewsets.ReadOnlyModelViewSet):
         idempotency_key = request.headers.get("Idempotency-Key", "").strip()
         max_length = Order._meta.get_field("idempotency_key").max_length - len(ADMIN_KEY_PREFIX)
         if not idempotency_key or len(idempotency_key) > max_length:
-            return Response(
-                {"detail": f"An Idempotency-Key header (max {max_length} characters) is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Responses.get_response(Responses.GENERAL.IDEMPOTENCY_KEY_REQUIRED)
         fingerprint = request_fingerprint(request.data)
         try:
             if order := find_admin_order(idempotency_key, fingerprint):
@@ -117,7 +115,7 @@ class AdminOrderViewSet(AdminPermissionMixin, viewsets.ReadOnlyModelViewSet):
                 lines={line["variant"]: line["quantity"] for line in data["items"]},
             )
         except CheckoutRejected as exc:
-            return Response(exc.errors, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+            return Responses.get_response(Responses.ORDER.ITEMS_REJECTED, exc.errors)
         except IdempotencyKeyReused:
             return idempotency_key_reused_response()
         return self._created(order, created=created)
@@ -127,7 +125,8 @@ class AdminOrderViewSet(AdminPermissionMixin, viewsets.ReadOnlyModelViewSet):
         return Response(
             {
                 "order_number": order.order_number,
-                "payment_redirect_url": get_payment_gateway().payment_url(order),
+                # The customer pays from their order page on the storefront (the bank link is made there).
+                "payment_redirect_url": f"{settings.STOREFRONT_URL}/account/orders/{order.order_number}",
                 "order": OrderSerializer(order).data,
             },
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,

@@ -13,6 +13,7 @@ from commerce.models.notification import Notification
 from commerce.models.order_address_snapshot import OrderAddressSnapshot
 from commerce.models.order_item import OrderItem
 from commerce.models.order_refund import OrderRefund
+from commerce.models.payment_attempt import PaymentAttempt
 from commerce.models.payment_transaction import PaymentTransaction
 from commerce.models.product_question import ProductQuestion
 from commerce.models.product_review import ProductReview
@@ -40,6 +41,7 @@ __all__ = [
     "OrderAddressSnapshot",
     "OrderItem",
     "OrderRefund",
+    "PaymentAttempt",
     "PaymentTransaction",
     "ProductQuestion",
     "ProductReview",
